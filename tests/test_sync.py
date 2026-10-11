@@ -108,6 +108,13 @@ def test_auto_canonical_poi_miss_falls_back_to_game_coords(monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM canonical_venues").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 1
 
+def test_refresh_no_creds_reports_auth_failed():
+    # 没凭证时不能静默返回 0，要把平台计入 auth_failed，界面才会提示去抓取
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    r = sync.refresh(conn, {}, {})
+    assert set(r["auth_failed"]) == {"zhongyulian", "flashx"}
+    assert r["ok"] is False and r["count"] == 0
+
 def test_seed_canonical_idempotent():
     conn = db.connect(":memory:"); db.init_schema(conn)
     cfg = {"canonical_venues": [{"canonical_name": "A馆", "lat": 1.0, "lng": 2.0,

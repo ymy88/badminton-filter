@@ -148,8 +148,9 @@ def refresh(conn, creds, config):
     games, auth_failed, errors = [], [], []
     for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today)),
                         ("flashx", lambda c: _fetch_flashx(c, today))):
-        if source not in creds:
-            continue  # 未抓到凭证的平台直接跳过
+        if not creds.get(source):
+            auth_failed.append(source)  # 没凭证 → 当作凭证失效，界面提示去「抓取凭证」
+            continue
         try:
             got, bad = run(creds[source])
         except Exception:  # 单平台网络异常不拖垮另一平台，记入 errors
