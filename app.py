@@ -24,9 +24,10 @@ def create_app(conn, config, db_path=None):
             "SELECT games.*, canonical_venues.canonical_name FROM games "
             "LEFT JOIN canonical_venues ON games.canonical_id=canonical_venues.id").fetchall()
         cm = {}
-        for r in conn.execute("SELECT origin,place_key,drive_min,transit_min FROM commute"):
+        for r in conn.execute("SELECT origin,place_key,drive_min,transit_min,walk_m FROM commute"):
             cm[(r["origin"], r["place_key"])] = {"drive_min": r["drive_min"],
-                                                 "transit_min": r["transit_min"]}
+                                                 "transit_min": r["transit_min"],
+                                                 "walk_m": r["walk_m"]}
         out = []
         for r in rows:
             g = dict(r)

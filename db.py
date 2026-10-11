@@ -29,15 +29,17 @@ def init_schema(conn):
       address TEXT, geocoded_at TEXT);
     CREATE TABLE IF NOT EXISTS commute(
       origin TEXT, place_key TEXT, drive_min INTEGER, transit_min INTEGER,
-      computed_at TEXT, PRIMARY KEY(origin, place_key));
+      walk_m INTEGER, computed_at TEXT, PRIMARY KEY(origin, place_key));
     CREATE TABLE IF NOT EXISTS origins(
       key TEXT PRIMARY KEY, address TEXT, lat REAL, lng REAL);
     CREATE TABLE IF NOT EXISTS settings(
       key TEXT PRIMARY KEY, value TEXT);
     """)
-    # 旧库迁移：amap_id 为后加列，已存在则忽略
-    try:
-        conn.execute("ALTER TABLE canonical_venues ADD COLUMN amap_id TEXT")
-    except sqlite3.OperationalError:
-        pass
+    # 旧库迁移：后加列，已存在则忽略
+    for stmt in ("ALTER TABLE canonical_venues ADD COLUMN amap_id TEXT",
+                 "ALTER TABLE commute ADD COLUMN walk_m INTEGER"):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()

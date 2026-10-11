@@ -69,17 +69,24 @@ def enrich_venue(conn, game, canonical_list, origins_ll):
     _ensure_commute(conn, pk, commute.amap_coord(game["lat"], game["lng"]), origins_ll)
 
 def _ensure_commute(conn, pk, dest, origins_ll):
-    # 给场馆 pk 补各出发地通勤：已有缓存跳过；全失败不缓存（留待重试）
+    # 给场馆 pk 补各出发地通勤(驾车/公交/步行)：三项齐全才跳过；
+    # 部分缺失(某路线上次失败)会重算，已成功的字段保留，逐次补齐；全失败不写，留待重试
     for origin, oll in origins_ll.items():
-        if conn.execute("SELECT 1 FROM commute WHERE origin=? AND place_key=?",
-                        (origin, pk)).fetchone():
-            continue
+        row = conn.execute("SELECT drive_min,transit_min,walk_m FROM commute WHERE origin=? AND place_key=?",
+                           (origin, pk)).fetchone()
+        old = (row["drive_min"], row["transit_min"], row["walk_m"]) if row else (None, None, None)
+        if all(v is not None for v in old):
+            continue  # 三项齐全
         m = commute.route_minutes(oll, dest)
-        if m["drive_min"] is None and m["transit_min"] is None:
+        # 新值优先，失败的字段保留旧值
+        drive = m.get("drive_min") if m.get("drive_min") is not None else old[0]
+        transit = m.get("transit_min") if m.get("transit_min") is not None else old[1]
+        walk = m.get("walk_m") if m.get("walk_m") is not None else old[2]
+        if drive is None and transit is None and walk is None:
             continue
-        conn.execute("INSERT OR REPLACE INTO commute(origin,place_key,drive_min,transit_min,computed_at)"
-                     " VALUES(?,?,?,?,datetime('now'))",
-                     (origin, pk, m["drive_min"], m["transit_min"]))
+        conn.execute("INSERT OR REPLACE INTO commute(origin,place_key,drive_min,transit_min,walk_m,computed_at)"
+                     " VALUES(?,?,?,?,?,datetime('now'))",
+                     (origin, pk, drive, transit, walk))
         conn.commit()
 
 def _call(source, fn, *args):
@@ -211,7 +218,10 @@ def pending_count(conn):
         if r["lat"] is None:
             pending.add(("v", r["venue_key"])); continue
         pk = commute.place_key(r["canonical_id"], r["venue_key"])
-        have = conn.execute("SELECT COUNT(*) c FROM commute WHERE place_key=?", (pk,)).fetchone()["c"]
-        if origins and have < len(origins):
+        # 三项齐全的出发地才算"完成"（部分缺失会重算）
+        complete = conn.execute(
+            "SELECT COUNT(*) c FROM commute WHERE place_key=? AND drive_min IS NOT NULL"
+            " AND transit_min IS NOT NULL AND walk_m IS NOT NULL", (pk,)).fetchone()["c"]
+        if origins and complete < len(origins):
             pending.add(("pk", pk))
     return len(pending)

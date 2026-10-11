@@ -146,11 +146,28 @@ def test_pending_count_counts_unresolved_and_missing_commute():
     conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,date) VALUES('flashx','1','v1',NULL,NULL,'2999-01-01')")
     # v2 有坐标但无通勤（route 失败）
     conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,lng,date) VALUES('flashx','2','v2',NULL,31.1,121.5,'2999-01-01')")
-    # v3 有坐标且通勤齐
+    # v3 有坐标且通勤齐（驾车/公交/步行都有）
     conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,lng,date) VALUES('flashx','3','v3',NULL,31.2,121.6,'2999-01-01')")
-    conn.execute("INSERT INTO commute(origin,place_key,drive_min) VALUES('home','v:v3',10)")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:v3',10,20,500)")
     conn.commit()
     assert sync.pending_count(conn) == 2  # v1 + v2；v3 齐全不计
+
+def test_ensure_commute_retries_incomplete_and_merges(monkeypatch):
+    # 部分路线上次失败（行在但字段缺）→ 下次重算补齐，已成功的字段保留；三项齐全后不再调
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:x',12,NULL,NULL)")
+    conn.commit()
+    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": None, "transit_min": 40, "walk_m": None})
+    sync._ensure_commute(conn, "v:x", "121,31", {"home": "121.5,31.2"})
+    r = conn.execute("SELECT drive_min,transit_min,walk_m FROM commute WHERE place_key='v:x'").fetchone()
+    assert r["drive_min"] == 12 and r["transit_min"] == 40 and r["walk_m"] is None  # 旧值保留+补公交；步行仍缺
+    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 15, "transit_min": 42, "walk_m": 600})
+    sync._ensure_commute(conn, "v:x", "121,31", {"home": "121.5,31.2"})
+    r = conn.execute("SELECT drive_min,transit_min,walk_m FROM commute WHERE place_key='v:x'").fetchone()
+    assert (r["drive_min"], r["transit_min"], r["walk_m"]) == (15, 42, 600)
+    monkeypatch.setattr(sync.commute, "route_minutes",
+                        lambda o, d: (_ for _ in ()).throw(AssertionError("齐全不该再算")))
+    sync._ensure_commute(conn, "v:x", "121,31", {"home": "121.5,31.2"})  # 齐全 → 不调用
 
 def test_seed_canonical_idempotent():
     conn = db.connect(":memory:"); db.init_schema(conn)

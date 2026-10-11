@@ -66,6 +66,14 @@ def _duration_min(resp, key):
     except (AttributeError, IndexError, KeyError, TypeError):
         return None
 
+def _walk_meters(resp):
+    # 步行路径距离（米）；不受出发时间影响，用于评估走路/骑车
+    try:
+        paths = ((resp or {}).get("route") or {}).get("paths") or []
+        return int(paths[0]["distance"]) if paths else None
+    except (ValueError, IndexError, KeyError, TypeError, AttributeError):
+        return None
+
 def route_minutes(origin_ll, dest_ll):
     drive = _amap_get(f"{BASE}/v3/direction/driving",
                       {"origin": origin_ll, "destination": dest_ll})
@@ -73,7 +81,10 @@ def route_minutes(origin_ll, dest_ll):
     transit = _amap_get(f"{BASE}/v3/direction/transit/integrated",
                         {"origin": origin_ll, "destination": dest_ll,
                          "city": CITY, "cityd": CITY, "date": d, "time": t})
+    walk = _amap_get(f"{BASE}/v3/direction/walking",
+                     {"origin": origin_ll, "destination": dest_ll})
     dm = _duration_min(drive, "paths")
     tm = _duration_min(transit, "transits")
+    wm = _walk_meters(walk)
     time.sleep(0.3)  # 节流，避开 QPS
-    return {"drive_min": dm, "transit_min": tm}
+    return {"drive_min": dm, "transit_min": tm, "walk_m": wm}

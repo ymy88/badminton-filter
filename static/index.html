@@ -143,10 +143,11 @@ function parseTags(t) {
   } catch (e) { return [String(t)]; }
 }
 
+const fmtWalk = (m) => m == null ? "未知" : (m < 1000 ? m + "m" : (m / 1000).toFixed(1) + "km");
 const fmtCommute = (c) => {
   if (!c) return "未知";
   const d = c.drive_min, t = c.transit_min;
-  return `驾${d == null ? "未知" : d + "分"} / 公${t == null ? "未知" : t + "分"}`;
+  return `驾${d == null ? "未知" : d + "分"} / 公${t == null ? "未知" : t + "分"} / 步${fmtWalk(c.walk_m)}`;
 };
 
 function rowHtml(g, origin) {

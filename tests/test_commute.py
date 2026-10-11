@@ -17,24 +17,28 @@ def test_sec_to_min():
 def test_route_minutes_failure(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get", lambda url, params: None)
     r = commute.route_minutes("121,31", "121.5,31.2")
-    assert r == {"drive_min": None, "transit_min": None}
+    assert r == {"drive_min": None, "transit_min": None, "walk_m": None}
 
 def test_route_minutes_parses(monkeypatch):
     def fake(url, params):
         if "driving" in url:
             return {"status": "1", "route": {"paths": [{"duration": "1200"}]}}
-        return {"status": "1", "route": {"transits": [{"duration": "1800"}]}}
+        if "transit" in url:
+            return {"status": "1", "route": {"transits": [{"duration": "1800"}]}}
+        return {"status": "1", "route": {"paths": [{"distance": "1500"}]}}  # walking
     monkeypatch.setattr(commute, "_amap_get", fake)
-    assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": 20, "transit_min": 30}
+    assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": 20, "transit_min": 30, "walk_m": 1500}
 
-# 评审修复：响应结构异常（缺 duration）时置 None，不抛
+# 评审修复：响应结构异常（缺 duration/distance）时置 None，不抛
 def test_route_minutes_missing_duration(monkeypatch):
     def fake(url, params):
         if "driving" in url:
             return {"status": "1", "route": {"paths": [{}]}}
-        return {"status": "1", "route": {"transits": [{}]}}
+        if "transit" in url:
+            return {"status": "1", "route": {"transits": [{}]}}
+        return {"status": "1", "route": {"paths": [{}]}}  # walking 无 distance
     monkeypatch.setattr(commute, "_amap_get", fake)
-    assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": None, "transit_min": None}
+    assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": None, "transit_min": None, "walk_m": None}
 
 # 评审修复：geocode 的 location 格式异常时返回 None，不抛
 def test_geocode_bad_location(monkeypatch):
