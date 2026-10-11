@@ -10,3 +10,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# SDD 工作区（scratch）
+.superpowers/
