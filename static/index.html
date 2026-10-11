@@ -17,13 +17,14 @@
   #addr input { width: 360px; }
   .err { color: #c00; }
   .ok { color: #070; }
-  main { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
-  aside { width: 260px; flex: none; background: #fff; padding: 12px; border-radius: 6px; }
-  aside .f { margin-bottom: 10px; }
-  aside .f > span { display: block; color: #666; font-size: 12px; }
+  main { padding: 16px; }
+  aside { background: #fff; padding: 12px; border-radius: 6px; margin-bottom: 16px;
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
+  aside .f { margin: 0; }
+  aside .f > span { display: block; color: #666; font-size: 12px; margin-bottom: 2px; }
   aside input[type=number] { width: 70px; }
-  aside input[type=text] { width: 100%; }
-  section { flex: 1; min-width: 0; background: #fff; border-radius: 6px; padding: 8px; overflow-x: auto; }
+  aside select { min-width: 120px; }
+  section { background: #fff; border-radius: 6px; padding: 8px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
   th.s { cursor: pointer; user-select: none; }
@@ -34,9 +35,8 @@
   .tag { display: inline-block; padding: 0 6px; margin: 0 3px 2px 0; background: #e8eefc; border-radius: 8px; font-size: 12px; }
   .src { font-size: 12px; padding: 0 6px; border-radius: 3px; background: #ddd; }
   .muted { color: #999; }
-  aside select { width: 100%; }
   .chipbox { border: 1px solid #ccc; border-radius: 6px; padding: 2px 4px; display: flex;
-    flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; align-items: center; cursor: text; background: #fff; }
+    flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; min-width: 180px; align-items: center; cursor: text; background: #fff; }
   .chip { background: #e0e7ff; border-radius: 10px; padding: 1px 6px; font-size: 12px;
     display: inline-flex; align-items: center; gap: 4px; }
   .chip b { cursor: pointer; color: #888; font-weight: normal; }
