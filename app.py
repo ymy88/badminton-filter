@@ -37,8 +37,21 @@ def create_app(conn, config):
     def get_config():
         names = [r["canonical_name"] for r in
                  conn.execute("SELECT canonical_name FROM canonical_venues ORDER BY id")]
-        return jsonify({"keywords": config.get("keywords", {"include": [], "exclude": []}),
-                        "canonical_names": names})
+        row = conn.execute("SELECT value FROM settings WHERE key='keywords'").fetchone()
+        kw = json.loads(row["value"]) if row else {"include": [], "exclude": []}
+        return jsonify({"keywords": kw, "canonical_names": names})
+
+    @app.post("/api/keywords")
+    def save_keywords():
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"ok": False, "msg": "body 须为 JSON 对象"}), 400
+        kw = {d: [s for s in (body.get(d) or []) if isinstance(s, str) and s]
+              for d in ("include", "exclude")}  # 剔空串，防脏数据
+        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('keywords',?)",
+                     (json.dumps(kw, ensure_ascii=False),))
+        conn.commit()
+        return jsonify({"ok": True})
 
     @app.get("/api/origins")
     def get_origins():

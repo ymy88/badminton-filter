@@ -194,6 +194,13 @@ document.querySelectorAll("#form input, header input, #sortBy").forEach((el) => 
   el.addEventListener("input", render);
   el.addEventListener("change", render);
 });
+// 关键字改完（失焦/回车）即存库，下次打开自动回填
+for (const id of ["kwInc", "kwExc"]) {
+  $(id).addEventListener("change", () => {
+    api("/api/keywords", { include: list("kwInc"), exclude: list("kwExc") })
+      .catch((e) => { $("status").textContent = "关键字保存失败：" + e; });
+  });
+}
 document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; render(); }));
 $("tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr.row");

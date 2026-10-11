@@ -30,6 +30,8 @@ def init_schema(conn):
       computed_at TEXT, PRIMARY KEY(origin, place_key));
     CREATE TABLE IF NOT EXISTS origins(
       key TEXT PRIMARY KEY, address TEXT, lat REAL, lng REAL);
+    CREATE TABLE IF NOT EXISTS settings(
+      key TEXT PRIMARY KEY, value TEXT);
     """)
     # 旧库迁移：amap_id 为后加列，已存在则忽略
     try:

@@ -23,6 +23,14 @@ def test_filters_js_is_served():
     assert r.status_code == 200
     assert b"applyFilters" in r.data
 
+def test_keywords_save_and_load_roundtrip():
+    # 关键字存库：保存→读回，空串被剔除
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    client = appmod.create_app(conn, {}).test_client()
+    assert client.get("/api/config").get_json()["keywords"] == {"include": [], "exclude": []}
+    assert client.post("/api/keywords", json={"include": ["练球", ""], "exclude": ["教练"]}).get_json()["ok"] is True
+    assert client.get("/api/config").get_json()["keywords"] == {"include": ["练球"], "exclude": ["教练"]}
+
 def test_save_origins_geocodes_and_clears_commute(monkeypatch):
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
@@ -54,8 +62,9 @@ def test_get_origins_and_config():
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.0,121.0)")
     conn.execute("INSERT INTO canonical_venues(canonical_name) VALUES('馆A')")
+    conn.execute("INSERT INTO settings(key,value) VALUES('keywords','{\"include\":[\"x\"],\"exclude\":[]}')")
     conn.commit()
-    c = appmod.create_app(conn, {"keywords": {"include": ["x"], "exclude": []}}).test_client()
+    c = appmod.create_app(conn, {}).test_client()
     o = c.get("/api/origins").get_json()
     assert o["home"] == {"address": "家", "has_coord": True}
     assert o["company"] == {"address": "", "has_coord": False}
