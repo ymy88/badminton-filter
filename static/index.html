@@ -56,7 +56,8 @@
     </select>
   </label>
   <button id="addrBtn">设置地址</button>
-  <button id="refreshBtn">刷新</button>
+  <button id="refreshBtn">刷新球局</button>
+  <button id="commuteBtn">算通勤</button>
   <button id="capBtn" style="display:none">抓取凭证</button>
   <span id="status"></span>
 </header>
@@ -189,10 +190,11 @@ async function init() {
   $("venues").innerHTML = (cfg.canonical_names || []).map((n) => `<option value="${esc(n)}">`).join("");
   applyOrigins(org);
   await loadGames();
-  // 若后台通勤还在算（例如刚点完刷新又刷新了网页），恢复进度显示并禁用刷新按钮
+  // 刷新网页时若后台拉取/通勤还在跑，恢复进度显示并禁用对应按钮
   try {
-    const s = await api("/api/refresh/status");
-    if (s.computing) { $("refreshBtn").disabled = true; pollCommute(); }
+    const [cs, rs] = await Promise.all([api("/api/commute/status"), api("/api/refresh/status")]);
+    if (cs.computing) { $("commuteBtn").disabled = true; pollCommute(); }
+    if (rs.refreshing) { $("refreshBtn").disabled = true; pollRefresh(); }
   } catch (e) { /* 状态查不到不影响主流程 */ }
 }
 
@@ -226,7 +228,7 @@ $("addrSave").onclick = async () => {
       if (x.ok && x.changed) changed = true;
     }
     applyOrigins(await api("/api/origins"));
-    if (changed) await loadGames();
+    if (changed) { await loadGames(); startCompute("地址已更新"); }  // 地址变→重算通勤
   } catch (e) { $("msgHome").className = "err"; $("msgHome").textContent = "保存失败：" + e; }
 };
 
@@ -238,7 +240,7 @@ function pollCommute(baseMsg) {
   let last = -1;
   const tick = async () => {
     let s;
-    try { s = await api("/api/refresh/status"); }
+    try { s = await api("/api/commute/status"); }
     catch { _pollTimer = setTimeout(tick, 5000); return; }
     if (s.commute_places !== last) { last = s.commute_places; await loadGames(); }
     if (s.computing) {
@@ -247,39 +249,68 @@ function pollCommute(baseMsg) {
     } else {
       await loadGames();
       $("status").textContent = (s.pending > 0)
-        ? `${pre}还有 ${s.pending} 个场馆通勤没算出（可能高德繁忙），稍后点刷新重试`
+        ? `${pre}还有 ${s.pending} 个场馆通勤没算出（可能高德繁忙），再点「算通勤」重试`
         : `${pre}通勤已算完（${s.commute_places}）`;
-      $("refreshBtn").disabled = false;  // 通勤算完才放开刷新
+      $("commuteBtn").disabled = false;  // 通勤算完才放开按钮
     }
   };
   tick();
 }
 
+// 只重新拉取球局入库（后台线程，不阻塞服务器），不算通勤
+let _refreshTimer = null;
+function pollRefresh() {
+  if (_refreshTimer) clearTimeout(_refreshTimer);
+  const tick = async () => {
+    let s;
+    try { s = await api("/api/refresh/status"); }
+    catch { _refreshTimer = setTimeout(tick, 2000); return; }
+    if (s.refreshing) {
+      $("status").textContent = "刷新球局中…（后台重新拉取两平台）";
+      _refreshTimer = setTimeout(tick, 2000);
+    } else {
+      const r = s.result || {};
+      const failed = r.auth_failed || [];
+      $("top").classList.toggle("bad", failed.length > 0);
+      $("capBtn").style.display = failed.length ? "" : "none";
+      let msg = `已拉取 ${r.count ?? 0} 场`;
+      if (failed.length) msg = `凭证失效：${failed.map((p) => SRC[p] || p).join("、")}（点「抓取凭证」）`;
+      if ((r.errors || []).length) msg += `；网络失败：${r.errors.map((e) => typeof e === "string" ? e : JSON.stringify(e)).join("；")}`;
+      else msg += "（新球馆的通勤点「算通勤」计算）";
+      $("status").textContent = msg;
+      await loadGames();
+      $("refreshBtn").disabled = false;
+    }
+  };
+  tick();
+}
 $("refreshBtn").onclick = async () => {
-  $("refreshBtn").disabled = true;  // 防连点：刷新+后台通勤整个过程禁用
-  $("status").textContent = "刷新中…";
+  $("refreshBtn").disabled = true;
+  $("status").textContent = "刷新球局中…";
   $("status").className = "";
   try {
-    const r = await api("/api/refresh", {});
-    const failed = r.auth_failed || [];
-    $("top").classList.toggle("bad", failed.length > 0);
-    $("capBtn").style.display = failed.length ? "" : "none";
-    let msg = `刷新完成，${r.count ?? 0} 场`;
-    if (failed.length) msg = `凭证失效：${failed.map((p) => SRC[p] || p).join("、")}（点「抓取凭证」）`;
-    if ((r.errors || []).length) msg += `；网络失败：${r.errors.map((e) => typeof e === "string" ? e : JSON.stringify(e)).join("；")}`;
-    $("status").textContent = msg;
-    await loadGames();          // 球局立刻显示（通勤可能还是「未知」）
-    if (r.computing) pollCommute(msg);  // 通勤后台边算边刷，算完由 pollCommute 放开按钮
-    else $("refreshBtn").disabled = false;
+    await api("/api/refresh", {});
+    pollRefresh();
   } catch (e) { $("status").textContent = "刷新失败：" + e; $("refreshBtn").disabled = false; }
 };
+
+// 单独触发后台算通勤（慢、耗高德额度）；已算过的走缓存只补缺失
+async function startCompute(baseMsg) {
+  $("commuteBtn").disabled = true;
+  try {
+    const r = await api("/api/commute", {});
+    if (r.computing) pollCommute(baseMsg);
+    else { $("status").textContent = "通勤无需计算"; $("commuteBtn").disabled = false; }
+  } catch (e) { $("status").textContent = "算通勤失败：" + e; $("commuteBtn").disabled = false; }
+}
+$("commuteBtn").onclick = () => startCompute("");
 
 $("capBtn").onclick = async () => {
   $("status").textContent = "抓取中：请打开对应小程序刷一下；若抓不到先关 VPN/sing-box…";
   try {
     const r = await api("/api/creds/capture", {});
     const got = Object.keys(r).filter((k) => r[k]).map((k) => SRC[k] || k);
-    $("status").textContent = (got.length ? `已拿到新凭证：${got.join("、")}。` : "没抓到凭证。") + "请重新点「刷新」。";
+    $("status").textContent = (got.length ? `已拿到新凭证：${got.join("、")}。` : "没抓到凭证。") + "请重新点「刷新球局」。";
   } catch (e) { $("status").textContent = "抓取失败：" + e; }
 };
 

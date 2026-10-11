@@ -9,6 +9,8 @@ def create_app(conn, config, db_path=None):
     app = Flask(__name__, static_folder=None)
     compute_lock = threading.Lock()   # 保证同时只有一个后台通勤任务
     compute_rerun = threading.Event()  # 运行期间又被触发 → 跑完再补一轮
+    refresh_lock = threading.Lock()   # 保证同时只有一个后台拉取任务
+    refresh_box = {"result": None}    # 最近一次拉取结果（供前端轮询取回）
 
     @app.get("/")
     def index():
@@ -86,9 +88,7 @@ def create_app(conn, config, db_path=None):
             conn.execute("DELETE FROM commute WHERE origin=?", (o,))  # 坐标变了，缓存作废
             conn.commit()
             res[o] = {"ok": True, "changed": True}
-        if any(v.get("changed") for v in res.values()):
-            _start_compute()  # 地址变了，后台重算该出发地通勤
-        return jsonify(res)
+        return jsonify(res)  # 通勤由前端在地址改动后调 /api/commute 触发
 
     def _start_compute():
         # 后台算通勤，不阻塞请求。单飞：同时只跑一个线程；
@@ -112,14 +112,41 @@ def create_app(conn, config, db_path=None):
         threading.Thread(target=bg, daemon=True).start()
         return True
 
+    def _start_refresh():
+        # 后台拉取入库，不阻塞请求（拉取 1333 场 + 解析较慢，同步会冻住单线程服务）
+        if not db_path:  # 无 db_path(测试)：同步跑，用主连接
+            refresh_box["result"] = sync.refresh(conn, creds.load(), config)
+            return False
+        if not refresh_lock.acquire(blocking=False):
+            return True  # 已在拉取
+        def bg():
+            try:
+                c = db.connect(db_path)
+                try:
+                    refresh_box["result"] = sync.refresh(c, creds.load(), config)
+                finally:
+                    c.close()
+            finally:
+                refresh_lock.release()
+        threading.Thread(target=bg, daemon=True).start()
+        return True
+
     @app.post("/api/refresh")
     def refresh():
-        res = sync.refresh(conn, creds.load(), config)
-        res["computing"] = _start_compute()  # 通勤在后台算
-        return jsonify(res)
+        refreshing = _start_refresh()  # 只拉取入库，不算通勤
+        return jsonify({"refreshing": refreshing,
+                        "result": None if refreshing else refresh_box["result"]})
 
     @app.get("/api/refresh/status")
     def refresh_status():
+        return jsonify({"refreshing": refresh_lock.locked(), "result": refresh_box["result"]})
+
+    @app.post("/api/commute")
+    def commute_recompute():
+        return jsonify({"computing": _start_compute()})  # 单独触发后台算通勤
+
+    @app.get("/api/commute/status")
+    def commute_status():
         return jsonify({"computing": compute_lock.locked(),
                         "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"],
                         "pending": sync.pending_count(conn)})

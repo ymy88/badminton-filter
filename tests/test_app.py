@@ -23,13 +23,26 @@ def test_filters_js_is_served():
     assert r.status_code == 200
     assert b"applyFilters" in r.data
 
-def test_refresh_status_shape():
+def test_commute_status_shape():
     conn = db.connect(":memory:"); db.init_schema(conn)
-    r = appmod.create_app(conn, {}).test_client().get("/api/refresh/status").get_json()
+    r = appmod.create_app(conn, {}).test_client().get("/api/commute/status").get_json()
     assert r["computing"] is False and r["commute_places"] == 0
 
-def test_refresh_compute_single_flight_and_rerun(monkeypatch, tmp_path):
-    # 连点刷新：后台通勤不并发（单飞），但期间的触发不丢（跑完补一轮）
+def test_refresh_does_not_start_compute(monkeypatch, tmp_path):
+    # 刷新球局与算通勤已拆开：POST /api/refresh 不再触发通勤
+    import sync
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    monkeypatch.setattr(sync, "refresh", lambda *a: {"ok": True, "count": 0, "auth_failed": [], "errors": []})
+    called = []
+    monkeypatch.setattr(sync, "compute_pending", lambda p, c: called.append(1))
+    client = appmod.create_app(conn, {}, db_path=str(tmp_path / "x.db")).test_client()
+    r = client.post("/api/refresh").get_json()
+    assert "computing" not in r
+    import time; time.sleep(0.05)
+    assert called == []  # 刷新不算通勤
+
+def test_refresh_runs_in_background(monkeypatch, tmp_path):
+    # 拉取在后台线程跑：POST 立刻返回不阻塞，结果经 /api/refresh/status 取回
     import threading, time, sync
     def _wait(cond, t=2.0):
         end = time.time() + t
@@ -38,16 +51,38 @@ def test_refresh_compute_single_flight_and_rerun(monkeypatch, tmp_path):
             time.sleep(0.01)
         return False
     conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync, "refresh", lambda *a: {"ok": True, "count": 0, "auth_failed": [], "errors": []})
+    gate = threading.Event()
+    def fake_refresh(c, cr, cfg):
+        gate.wait(2)
+        return {"ok": True, "count": 7, "auth_failed": [], "errors": []}
+    monkeypatch.setattr(sync, "refresh", fake_refresh)
+    client = appmod.create_app(conn, {}, db_path=str(tmp_path / "x.db")).test_client()
+    r = client.post("/api/refresh").get_json()
+    assert r["refreshing"] is True and r["result"] is None   # 立刻返回，不阻塞
+    assert client.get("/api/refresh/status").get_json()["refreshing"] is True
+    gate.set()
+    assert _wait(lambda: client.get("/api/refresh/status").get_json()["refreshing"] is False)
+    assert client.get("/api/refresh/status").get_json()["result"]["count"] == 7
+
+def test_commute_single_flight_and_rerun(monkeypatch, tmp_path):
+    # 连点「算通勤」：后台不并发（单飞），但期间的触发不丢（跑完补一轮）
+    import threading, time, sync
+    def _wait(cond, t=2.0):
+        end = time.time() + t
+        while time.time() < end:
+            if cond(): return True
+            time.sleep(0.01)
+        return False
+    conn = db.connect(":memory:"); db.init_schema(conn)
     calls, gate = [], threading.Event()
     monkeypatch.setattr(sync, "compute_pending", lambda p, c: (calls.append(1), gate.wait(2)))
     client = appmod.create_app(conn, {}, db_path=str(tmp_path / "x.db")).test_client()
-    client.post("/api/refresh")                 # 起第一轮，卡在 gate
+    assert client.post("/api/commute").get_json()["computing"] is True
     assert _wait(lambda: len(calls) == 1)
-    client.post("/api/refresh")                 # 第二次：占锁中 → 不并发，置 rerun
+    client.post("/api/commute")                 # 占锁中 → 不并发，置 rerun
     time.sleep(0.05)
-    assert len(calls) == 1                       # 没有并发起第二个
-    gate.set()                                   # 放行 → 收尾时因 rerun 再补一轮
+    assert len(calls) == 1
+    gate.set()                                   # 放行 → 因 rerun 再补一轮
     assert _wait(lambda: len(calls) == 2)
 
 def test_keywords_save_and_load_roundtrip():
