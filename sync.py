@@ -201,3 +201,17 @@ def _fill_missing_commute(conn, origins_ll):
             _ensure_commute(conn, pk, dest, origins_ll)
         except Exception:
             pass
+
+def pending_count(conn):
+    # 还需补数据的场馆数：无坐标(POI/geocode 失败) + 有坐标但缺某出发地通勤
+    # 高德失败不缓存，故这些会在下次刷新/改地址时自动重试；此数用于提示用户重试
+    origins = [r["key"] for r in conn.execute("SELECT key FROM origins WHERE lat IS NOT NULL")]
+    pending = set()
+    for r in conn.execute("SELECT canonical_id, venue_key, lat FROM games"):
+        if r["lat"] is None:
+            pending.add(("v", r["venue_key"])); continue
+        pk = commute.place_key(r["canonical_id"], r["venue_key"])
+        have = conn.execute("SELECT COUNT(*) c FROM commute WHERE place_key=?", (pk,)).fetchone()["c"]
+        if origins and have < len(origins):
+            pending.add(("pk", pk))
+    return len(pending)

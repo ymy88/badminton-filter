@@ -139,6 +139,19 @@ def test_compute_pending_fills_commute(tmp_path, monkeypatch):
     conn = db.connect(p)
     assert conn.execute("SELECT drive_min FROM commute").fetchone()["drive_min"] == 18
 
+def test_pending_count_counts_unresolved_and_missing_commute():
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','x',31.0,121.0)")
+    # v1 无坐标（POI/geocode 都失败）
+    conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,date) VALUES('flashx','1','v1',NULL,NULL,'2999-01-01')")
+    # v2 有坐标但无通勤（route 失败）
+    conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,lng,date) VALUES('flashx','2','v2',NULL,31.1,121.5,'2999-01-01')")
+    # v3 有坐标且通勤齐
+    conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,lng,date) VALUES('flashx','3','v3',NULL,31.2,121.6,'2999-01-01')")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min) VALUES('home','v:v3',10)")
+    conn.commit()
+    assert sync.pending_count(conn) == 2  # v1 + v2；v3 齐全不计
+
 def test_seed_canonical_idempotent():
     conn = db.connect(":memory:"); db.init_schema(conn)
     cfg = {"canonical_venues": [{"canonical_name": "A馆", "lat": 1.0, "lng": 2.0,

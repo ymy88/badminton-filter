@@ -120,7 +120,8 @@ def create_app(conn, config, db_path=None):
     @app.get("/api/refresh/status")
     def refresh_status():
         return jsonify({"computing": compute_lock.locked(),
-                        "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"]})
+                        "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"],
+                        "pending": sync.pending_count(conn)})
 
     @app.post("/api/creds/capture")
     def capture():
