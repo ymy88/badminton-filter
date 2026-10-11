@@ -12,6 +12,10 @@ def create_app(conn, config):
     def index():
         return send_from_directory("static", "index.html")
 
+    @app.get("/filters.js")
+    def filters_js():  # 页面 <script src="filters.js"> 依赖此路由（static_folder=None）
+        return send_from_directory("static", "filters.js")
+
     @app.get("/api/games")
     def games():
         rows = conn.execute(

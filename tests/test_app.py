@@ -17,6 +17,12 @@ def test_games_endpoint_attaches_commute():
     assert g["commute"]["home"]["transit_min"] == 35
     assert g["commute"]["company"] is None
 
+def test_filters_js_is_served():
+    # 页面 <script src="filters.js"> 依赖此路由，缺了真机会 404 白屏
+    r = _app().get("/filters.js")
+    assert r.status_code == 200
+    assert b"applyFilters" in r.data
+
 def test_save_origins_geocodes_and_clears_commute(monkeypatch):
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
