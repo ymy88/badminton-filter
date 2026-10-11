@@ -1,6 +1,6 @@
 # 球局筛选工具 实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 把中羽联和闪动FlashX的上海羽毛球球局拉进本地 SQLite，在 localhost 网页上按用户条件筛选、排序、看详情。
 
@@ -62,7 +62,7 @@
 **Interfaces:**
 - Produces: `db.connect(path) -> sqlite3.Connection`；`db.init_schema(conn)` 建全部表；连接设 `row_factory = sqlite3.Row`。
 
-- [ ] **Step 0: 初始化 uv 项目**
+- [x] **Step 0: 初始化 uv 项目**
 
 ```bash
 uv init --bare --python 3.12   # 生成 pyproject.toml，不建示例代码
@@ -70,7 +70,7 @@ uv add flask
 uv add --dev pytest
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_db.py
@@ -95,12 +95,12 @@ def test_games_unique_source_id():
     assert conn.execute("SELECT COUNT(*) c FROM games").fetchone()["c"] == 1
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_db.py -v`
 Expected: FAIL（`No module named 'db'`）
 
-- [ ] **Step 3: 写 db.py**
+- [x] **Step 3: 写 db.py**
 
 ```python
 # db.py
@@ -153,11 +153,11 @@ def init_schema(conn):
 
 出发地地址**不在 config**：运行后在网页界面填，存入 db 的 `origins` 表（Task 8 的 `/api/origins`）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `uv run pytest tests/test_db.py -v` → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add pyproject.toml uv.lock config.example.json db.py tests/test_db.py
@@ -175,7 +175,7 @@ git commit -m "feat: uv 项目初始化 + SQLite 建表与连接助手"
 - Consumes: 无。
 - Produces: `zhongyulian.parse_games(resp_text: str, day: int, today: date) -> list[dict]`。返回统一记录 dict，键：`source, source_id, title, date, start_time, end_time, duration_min, venue_name, venue_key, price, applied_num, total_num, lat, lng, raw_text, tags, organizer, club_name, detail_ref`。`lat/lng=None`（中羽联无坐标）。`source='zhongyulian'`，`venue_key=f"zhongyulian:{address_id}"`，`tags='[]'`。非 JSON 或 `ok!=1` → 返回 `[]`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_zhongyulian.py
@@ -230,11 +230,11 @@ def test_time_malformed():
     assert g2["duration_min"] == 870
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_zhongyulian.py -v` → FAIL
 
-- [ ] **Step 3: 写 platforms/zhongyulian.py 的 parse_games**
+- [x] **Step 3: 写 platforms/zhongyulian.py 的 parse_games**
 
 ```python
 # platforms/zhongyulian.py
@@ -293,11 +293,11 @@ def parse_games(resp_text, day, today):
     return out
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `uv run pytest tests/test_zhongyulian.py -v` → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add platforms/__init__.py platforms/zhongyulian.py tests/test_zhongyulian.py
@@ -314,7 +314,7 @@ git commit -m "feat: 中羽联列表解析与归一化（含非JSON/异常容错
 **Interfaces:**
 - Produces: `flashx.parse_games(resp_text: str) -> list[dict]`。统一记录键同 Task 2。`source='flashx'`，`venue_key=f"flashx:{placeId}"`，`lat/lng` 取 `latitude/longitude`，`tags` 透传 `displayTags` 字符串，`price` 由 `showCost` 转 float（失败为 None），`duration` 由 `startTime/endTime` 算。`success` 非真或非 JSON → `[]`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_flashx.py
@@ -354,9 +354,9 @@ def test_non_json_or_fail_returns_empty():
     assert f.parse_games(json.dumps({"success": False})) == []
 ```
 
-- [ ] **Step 2: 运行确认失败** → `uv run pytest tests/test_flashx.py -v` → FAIL
+- [x] **Step 2: 运行确认失败** → `uv run pytest tests/test_flashx.py -v` → FAIL
 
-- [ ] **Step 3: 写 platforms/flashx.py**
+- [x] **Step 3: 写 platforms/flashx.py**
 
 ```python
 # platforms/flashx.py
@@ -403,9 +403,9 @@ def parse_games(resp_text):
     return out
 ```
 
-- [ ] **Step 4: 运行确认通过** → PASS
+- [x] **Step 4: 运行确认通过** → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add platforms/flashx.py tests/test_flashx.py
@@ -423,7 +423,7 @@ git commit -m "feat: 闪动FlashX列表解析与归一化（含价格/非JSON容
 - Consumes: 规范馆 list，每项 dict：`{id, canonical_name, lat, lng, name_patterns: list[str], platform_ids: list[str]}`。
 - Produces: `venues.classify(venue_name, venue_key, canonical_list) -> dict | None`。先按 `platform_ids` 精确匹配 `venue_key`，再按 `name_patterns` 对 `venue_name` 包含匹配；命中返回该规范馆 dict，否则 `None`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_venues.py
@@ -446,9 +446,9 @@ def test_platform_id_takes_priority():
     assert venues.classify("xyz", "flashx:12203", CANON)["canonical_name"] == "万体汇"
 ```
 
-- [ ] **Step 2: 运行确认失败** → FAIL
+- [x] **Step 2: 运行确认失败** → FAIL
 
-- [ ] **Step 3: 写 venues.py**
+- [x] **Step 3: 写 venues.py**
 
 ```python
 # venues.py
@@ -463,9 +463,9 @@ def classify(venue_name, venue_key, canonical_list):
     return None
 ```
 
-- [ ] **Step 4: 运行确认通过** → PASS
+- [x] **Step 4: 运行确认通过** → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add venues.py tests/test_venues.py
@@ -488,7 +488,7 @@ git commit -m "feat: 场馆按规范表归类（platform_id 优先、名字包�
   - `commute.route_minutes(origin_ll, dest_ll) -> dict`：`{"drive_min": int|None, "transit_min": int|None}`（任一失败置 None）。
   - key 从 `os.environ["GAO_DE_MAP_API_KEY"]` 读。
 
-- [ ] **Step 1: 写失败测试（纯逻辑 + 网络失败容错）**
+- [x] **Step 1: 写失败测试（纯逻辑 + 网络失败容错）**
 
 ```python
 # tests/test_commute.py
@@ -522,9 +522,9 @@ def test_route_minutes_parses(monkeypatch):
     assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": 20, "transit_min": 30}
 ```
 
-- [ ] **Step 2: 运行确认失败** → FAIL
+- [x] **Step 2: 运行确认失败** → FAIL
 
-- [ ] **Step 3: 写 commute.py**
+- [x] **Step 3: 写 commute.py**
 
 ```python
 # commute.py
@@ -577,9 +577,9 @@ def route_minutes(origin_ll, dest_ll):
     return {"drive_min": dm, "transit_min": tm}
 ```
 
-- [ ] **Step 4: 运行确认通过** → PASS
+- [x] **Step 4: 运行确认通过** → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add commute.py tests/test_commute.py
@@ -601,7 +601,7 @@ git commit -m "feat: 高德通勤封装（坐标顺序/缓存键/失败不阻塞
   - `sync.enrich_venue(conn, game, canonical_list, origins_ll)`：归类 → 补坐标 → 补通勤（命中缓存则跳过）。
   - `sync.refresh(conn, creds, config) -> dict`：全流程，返回 `{"ok": bool, "count": int, "auth_failed": [平台]}`。
 
-- [ ] **Step 1: 写失败测试（入库纯逻辑）**
+- [x] **Step 1: 写失败测试（入库纯逻辑）**
 
 ```python
 # tests/test_sync.py
@@ -630,9 +630,9 @@ def test_upsert_purges_past(tmp_path):
     assert ids == {"new"}
 ```
 
-- [ ] **Step 2: 运行确认失败** → FAIL
+- [x] **Step 2: 运行确认失败** → FAIL
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `sync.upsert_games`：
 
@@ -690,9 +690,9 @@ def enrich_venue(conn, game, canonical_list, origins_ll):
 
 `refresh` 串起：从 db `origins` 表读两个出发地的坐标（`origins_ll={"home":"lng,lat","company":"lng,lat"}`，缺坐标的出发地跳过其通勤，不报错）→ 对两平台 fetch+parse（捕获鉴权失败）→ upsert → 逐条 enrich。地址的地理编码与「地址变则清 commute」发生在界面保存地址时（Task 8 `/api/origins`），refresh 只读 origins 表现成坐标。鉴权失败平台计入 `auth_failed`，不中断另一平台。各平台 `fetch` 用 Task 7 的 creds 组装请求头（中羽联 POST JSON body 带 `skey`、`day`、`city:"上海"`、`cmd:"indexList"`、`limit/skip` 翻页 other 列表；闪动 GET 带 `x-access-token` 头、`date`/`pageNo` 翻页）。接口字段与请求头照 `RESEARCH.md`。
 
-- [ ] **Step 4: 运行确认通过** → `uv run pytest tests/test_sync.py -v` → PASS
+- [x] **Step 4: 运行确认通过** → `uv run pytest tests/test_sync.py -v` → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add sync.py platforms/zhongyulian.py platforms/flashx.py tests/test_sync.py
@@ -712,7 +712,7 @@ git commit -m "feat: 刷新编排（入库去重/清旧、场馆补坐标通勤�
   - `creds.is_auth_failure(source, resp_text, status_code) -> bool`：中羽联 `source='zhongyulian'` 且 JSON `ok==-2` → True；闪动 `status_code==401` 或 JSON `code in (401,403)` → True；否则 False。非 JSON（中羽联城市 Fatal error）→ False（不是鉴权问题）。
   - `creds.capture(timeout=90) -> dict`：拉起 `mitmdump --mode local:WeChat` 子进程 + addon，抓到两平台凭证写入后停；手测。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_creds.py
@@ -742,9 +742,9 @@ def test_save_sets_600(tmp_path, monkeypatch):
     assert creds.load() == {"a": 1}
 ```
 
-- [ ] **Step 2: 运行确认失败** → FAIL
+- [x] **Step 2: 运行确认失败** → FAIL
 
-- [ ] **Step 3: 写 creds.py**
+- [x] **Step 3: 写 creds.py**
 
 ```python
 # creds.py
@@ -780,9 +780,9 @@ def is_auth_failure(source, resp_text, status_code):
 
 `capture()`（手测）：写一个 mitmproxy addon（临时文件）只从 `service2.zhongyulian.com`/`flash.flashxsport.com` 的请求头/body 提取 `skey` 和 `x-access-token` + 必要头，`subprocess.Popen(["mitmdump","--mode","local:WeChat","-s",addon])`，轮询 `creds.json` 直到两平台都有或超时，然后 `terminate()`。首次调用前检查 `shutil.which("mitmdump")`，缺则抛带中文提示的异常。
 
-- [ ] **Step 4: 运行确认通过** → PASS
+- [x] **Step 4: 运行确认通过** → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add creds.py tests/test_creds.py
@@ -808,7 +808,7 @@ git commit -m "feat: 凭证读写与失效检测（区分鉴权失败与城市Fa
   - `POST /api/creds/capture` → 调 `creds.capture`，返回结果。
   - `app.create_app(conn, config)` 工厂，便于测试注入内存库。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_app.py
@@ -855,15 +855,15 @@ def test_save_origins_geocode_fail_keeps_old(monkeypatch):
     assert r["home"]["ok"] is False
 ```
 
-- [ ] **Step 2: 运行确认失败** → FAIL
+- [x] **Step 2: 运行确认失败** → FAIL
 
-- [ ] **Step 3: 实现 app.py**
+- [x] **Step 3: 实现 app.py**
 
 `create_app(conn, config)`：注册路由。`/api/games` 用 `SELECT games.*, canonical_venues.canonical_name FROM games LEFT JOIN canonical_venues ON games.canonical_id=canonical_venues.id`，每条再按 `place_key(canonical_id, venue_key)` 查 `commute` 的 home/company 两行，组装 `g["canonical_name"]` 与 `g["commute"]={"home":{...},"company":{...}}`。`/api/origins` 读写 `origins` 表；`POST` 时对地址有变化的出发地调 `commute.geocode`，成功则更新坐标并 `DELETE FROM commute WHERE origin=?` 清该出发地缓存，失败则该出发地返回错误、不动旧值。`GET /` 用 `send_from_directory("static","index.html")`。顶层 `app.py` main：读 `config.json`、连 `games.db`、`init_schema`、`threading.Timer` 开浏览器 `webbrowser.open`、`app.run(port=config["port"])`。
 
-- [ ] **Step 4: 运行确认通过** → PASS
+- [x] **Step 4: 运行确认通过** → PASS
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add app.py tests/test_app.py
@@ -883,7 +883,7 @@ git commit -m "feat: Flask 路由（games 带通勤、refresh、凭证抓取）"
   - `sortGames(games, by, origin, mode) -> games[]`
   - `criteria` 形状：`{date, startMin, startMax, durMin, origin, mode, commuteMax, includeUnknownCommute, venueInclude:[], venueExclude:[], priceMax, appliedRange:[min,max], totalRange:[min,max], onlyOpen:bool, kwInclude:[], kwExclude:[]}`。
 
-- [ ] **Step 1: 写失败测试（node 跑）**
+- [x] **Step 1: 写失败测试（node 跑）**
 
 ```javascript
 // tests/filters.test.js
@@ -928,18 +928,18 @@ assert.equal(s[0].source_id, "b");
 console.log("filters.js OK");
 ```
 
-- [ ] **Step 2: 运行确认失败** → `node tests/filters.test.js` → 报错（找不到模块/函数）
+- [x] **Step 2: 运行确认失败** → `node tests/filters.test.js` → 报错（找不到模块/函数）
 
-- [ ] **Step 3: 写 static/filters.js**
+- [x] **Step 3: 写 static/filters.js**
 
 实现 `applyFilters`（逐条过每个条件，空条件跳过）与 `sortGames`。关键字/场馆用 `Array.some(s => text.includes(s))`；通勤取 `g.commute[origin]?.[mode]`，为 null 时按 `includeUnknownCommute` 决定；`onlyOpen` 即 `applied_num < total_num`。文件尾部：
 ```javascript
 if (typeof module !== "undefined") module.exports = { applyFilters, sortGames };
 ```
 
-- [ ] **Step 4: 运行确认通过** → `node tests/filters.test.js` → 打印 `filters.js OK`
+- [x] **Step 4: 运行确认通过** → `node tests/filters.test.js` → 打印 `filters.js OK`
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add static/filters.js tests/filters.test.js
@@ -956,23 +956,23 @@ git commit -m "feat: 前端筛选与排序纯函数（node 自测）"
 **Interfaces:**
 - Consumes: `/api/games`、`/api/config`、`/api/origins`、`/api/refresh`、`/api/creds/capture`、`filters.js`。
 
-- [ ] **Step 1: 搭页面骨架**
+- [x] **Step 1: 搭页面骨架**
 
 单 HTML：顶栏（出发地 家/公司 单选、「设置地址」入口、刷新按钮、凭证状态条）、左栏筛选表单（日期/时间范围/时长/通勤方式+上限/价格/人数/还有空位/场馆 只看·不看/关键字 只找·排除）、右栏列表 `<table>`。「设置地址」展开两个输入框（家、公司地址）+ 保存按钮。引 `filters.js`。
 
-- [ ] **Step 2: 数据流 + 地址设置**
+- [x] **Step 2: 数据流 + 地址设置**
 
 页面载入 `GET /api/config`（填关键词预设）+ `GET /api/origins`（回填家/公司地址；两者皆空或缺坐标 → 提示「请先在『设置地址』填家和公司地址」）+ `GET /api/games` 存全量到 `window._games`。「设置地址」保存 → `POST /api/origins` → 某出发地地理编码失败则就地提示「地址查不到，填具体些」；成功后重拉 `/api/games`（通勤已变）。任何筛选控件 `input/change` → 读表单拼 `criteria` → `applyFilters` + `sortGames` → 重渲染 `<tbody>`。切出发地/排序同理。零往返。
 
-- [ ] **Step 3: 列表与详情**
+- [x] **Step 3: 列表与详情**
 
 每行：时间（date + start~end）、时长、场馆双名（`venue_name` +（`canonical_name` 若有，来自 games 关联 — 由 /api/games 带出 canonical_name））、当前出发地通勤（drive/transit）、价格、`applied/total`、来源标（中羽联/闪动）、tags。点行展开详情：`raw_text`、组织者、俱乐部、回原平台链接（闪动 `detail_ref`→小程序页；中羽联同理，无链接则显示 id 供手动查）。
 
-- [ ] **Step 4: 刷新与凭证**
+- [x] **Step 4: 刷新与凭证**
 
 刷新按钮 → `POST /api/refresh` → 成功重拉 `/api/games`；返回 `auth_failed` 非空 → 顶栏变红、显示「抓取凭证」按钮。点它 → `POST /api/creds/capture` + 文案提示「打开对应小程序刷一下；若抓不到先关 VPN/sing-box」；完成后提示重新刷新。
 
-- [ ] **Step 5: 手动验证 + 提交**
+- [x] **Step 5: 手动验证 + 提交**
 
 手测：`uv run app.py` → 浏览器自动打开 → 在「设置地址」填家/公司地址（验证地理编码成功、以及乱填时的「查不到」提示）→ 刷新拉到两平台球局 → 各筛选项逐个验证 → 切出发地通勤变化 → 点详情 → 制造凭证失效走一遍抓取。通过后：
 
@@ -985,6 +985,6 @@ git commit -m "feat: 前端单页（筛选/排序/详情/刷新/凭证抓取）"
 
 ## 收尾
 
-- [ ] 全量 pytest + node 测试通过：`uv run pytest -q && node tests/filters.test.js`
-- [ ] `.gitignore` 确认挡住 `creds.json`/`games.db`/`*.mitm`（Task 建仓时已加）
-- [ ] 复制 `config.example.json` → `config.json`，填真实出发地与规范场馆，端到端跑一次
+- [x] 全量 pytest + node 测试通过：`uv run pytest -q && node tests/filters.test.js`
+- [x] `.gitignore` 确认挡住 `creds.json`/`games.db`/`*.mitm`（Task 建仓时已加）
+- [x] 复制 `config.example.json` → `config.json`，填真实出发地与规范场馆，端到端跑一次
