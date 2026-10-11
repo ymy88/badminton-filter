@@ -44,9 +44,10 @@ function applyFilters(games, criteria) {
 
     if (c.onlyOpen && !(g.applied_num < g.total_num)) return false;
 
-    // include 用 some(Boolean)：仅含空串的列表视为「无筛选」，不误剔全部
-    if (c.venueInclude?.some(Boolean) && !textHit(g.venue_name || "", c.venueInclude)) return false;
-    if (c.venueExclude?.length && textHit(g.venue_name || "", c.venueExclude)) return false;
+    // 场馆同时匹配原始馆名与统一名（下拉可能给的是统一名）；include 用 some(Boolean) 容空串
+    const venueText = (g.venue_name || "") + "\u0001" + (g.canonical_name || "");
+    if (c.venueInclude?.some(Boolean) && !textHit(venueText, c.venueInclude)) return false;
+    if (c.venueExclude?.length && textHit(venueText, c.venueExclude)) return false;
 
     if (c.kwInclude?.some(Boolean) && !textHit(g.raw_text || "", c.kwInclude)) return false;
     if (c.kwExclude?.length && textHit(g.raw_text || "", c.kwExclude)) return false;

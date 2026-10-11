@@ -20,6 +20,9 @@ assert.equal(applyFilters([g({ venue_name: "万体汇" }), g({ venue_name: "荫�
   { venueInclude: ["万体汇"] }).length, 1);
 assert.equal(applyFilters([g({ venue_name: "万体汇" }), g({ venue_name: "荫荫" })],
   { venueExclude: ["荫荫"] }).length, 1);
+// 场馆按统一名也能筛（下拉给的是统一名，原始馆名不同）
+assert.equal(applyFilters([g({ venue_name: "万体汇", canonical_name: "徐家汇体育公园" }), g({ venue_name: "荫荫" })],
+  { venueInclude: ["徐家汇"] }).length, 1);
 
 // 通勤上限（当前出发地+方式）
 assert.equal(applyFilters([g()], { origin: "home", mode: "drive_min", commuteMax: 10 }).length, 0);

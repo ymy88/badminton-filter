@@ -34,6 +34,18 @@
   .tag { display: inline-block; padding: 0 6px; margin: 0 3px 2px 0; background: #e8eefc; border-radius: 8px; font-size: 12px; }
   .src { font-size: 12px; padding: 0 6px; border-radius: 3px; background: #ddd; }
   .muted { color: #999; }
+  aside select { width: 100%; }
+  .chipbox { border: 1px solid #ccc; border-radius: 6px; padding: 2px 4px; display: flex;
+    flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; align-items: center; cursor: text; background: #fff; }
+  .chip { background: #e0e7ff; border-radius: 10px; padding: 1px 6px; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 4px; }
+  .chip b { cursor: pointer; color: #888; font-weight: normal; }
+  .chipbox input { border: none; outline: none; flex: 1; min-width: 50px; font-size: 13px; background: transparent; }
+  .dd { position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px; background: #fff;
+    border: 1px solid #ccc; border-radius: 6px; max-height: 200px; overflow: auto; z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  .dd div { padding: 4px 8px; cursor: pointer; font-size: 13px; }
+  .dd div:hover { background: #eef; }
 </style>
 </head>
 <body>
@@ -69,20 +81,24 @@
 </div>
 <main>
   <aside id="form">
-    <div class="f"><span>日期</span><input type="date" id="date"></div>
-    <div class="f"><span>开始时间范围</span><input type="time" id="tMin"> ~ <input type="time" id="tMax"></div>
+    <div class="f"><span>日期</span><select id="date">
+      <option value="">不限</option><option value="0">今天</option>
+      <option value="1">明天</option><option value="2">后天</option></select></div>
+    <div class="f"><span>开始时间</span><select id="timeBucket">
+      <option value="">不限</option><option value="360,600">早上 6–10 点</option>
+      <option value="600,840">上午 10–下午 2 点</option><option value="840,1080">下午 2–6 点</option>
+      <option value="1080,1320">晚上 6–10 点</option></select></div>
     <div class="f"><span>时长下限（分钟）</span><input type="number" id="durMin" min="0"></div>
     <div class="f"><span>通勤上限（分钟，按当前出发地/方式）</span><input type="number" id="commuteMax" min="0">
       <label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
     <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
-    <div class="f"><span>已报名范围</span><input type="number" id="apMin" min="0"> ~ <input type="number" id="apMax" min="0"></div>
-    <div class="f"><span>总人数范围</span><input type="number" id="toMin" min="0"> ~ <input type="number" id="toMax" min="0"></div>
+    <div class="f"><span>已报名范围（上下限可相同=精确）</span><input type="number" id="apMin" min="0"> ~ <input type="number" id="apMax" min="0"></div>
+    <div class="f"><span>总人数范围（上下限可相同=精确）</span><input type="number" id="toMin" min="0"> ~ <input type="number" id="toMax" min="0"></div>
     <div class="f"><label><input type="checkbox" id="onlyOpen">只看还有空位</label></div>
-    <div class="f"><span>场馆只看（逗号分隔）</span><input type="text" id="venueInc" list="venues"></div>
-    <div class="f"><span>场馆不看（逗号分隔）</span><input type="text" id="venueExc" list="venues"></div>
-    <datalist id="venues"></datalist>
-    <div class="f"><span>关键字只找（逗号分隔）</span><input type="text" id="kwInc"></div>
-    <div class="f"><span>关键字排除（逗号分隔）</span><input type="text" id="kwExc"></div>
+    <div class="f"><span>场馆只看</span><div class="chipbox" id="venueInc"></div></div>
+    <div class="f"><span>场馆不看</span><div class="chipbox" id="venueExc"></div></div>
+    <div class="f"><span>关键字只找</span><div class="chipbox" id="kwInc"></div></div>
+    <div class="f"><span>关键字排除</span><div class="chipbox" id="kwExc"></div></div>
   </aside>
   <section>
     <div id="count" class="muted"></div>
@@ -104,11 +120,54 @@ const $ = (id) => document.getElementById(id);
 const SRC = { zhongyulian: "中羽联", flashx: "闪动" };
 const radio = (name) => document.querySelector(`input[name=${name}]:checked`).value;
 const num = (id) => ($(id).value === "" ? null : Number($(id).value));
-const list = (id) => $(id).value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-// "HH:MM" → 当日分钟数；空返回 null
-const mins = (id) => { const v = $(id).value; if (!v) return null; const [h, m] = v.split(":").map(Number); return h * 60 + m; };
 const range = (a, b) => (num(a) == null && num(b) == null ? null : [num(a) ?? 0, num(b) ?? Infinity]);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// 日期：今天偏移 off 天 → 本地 "YYYY-MM-DD"
+const dateForOffset = (off) => { const d = new Date(); d.setDate(d.getDate() + off);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+// 胶囊输入控件：从下拉选项点选成胶囊；allowNew 时可打字回车加新词
+function makeChips(boxId, getOptions, { allowNew = false, onChange = () => {} } = {}) {
+  const box = $(boxId), vals = [];
+  const input = document.createElement("input");
+  const dd = document.createElement("div"); dd.className = "dd"; dd.style.display = "none";
+  box.append(input, dd);
+  const renderChips = () => {
+    [...box.querySelectorAll(".chip")].forEach((e) => e.remove());
+    vals.forEach((v, i) => {
+      const c = document.createElement("span"); c.className = "chip"; c.textContent = v;
+      const x = document.createElement("b"); x.textContent = "×";
+      x.onclick = (e) => { e.stopPropagation(); vals.splice(i, 1); renderChips(); onChange(); };
+      c.appendChild(x); box.insertBefore(c, input);
+    });
+  };
+  const add = (v) => { v = v.trim(); if (v && !vals.includes(v)) { vals.push(v); renderChips(); onChange(); } input.value = ""; showDD(); };
+  const showDD = () => {
+    const q = input.value.trim();
+    let opts = getOptions().filter((o) => !vals.includes(o) && (!q || o.includes(q)));
+    dd.innerHTML = "";
+    if (allowNew && q && !opts.includes(q) && !vals.includes(q)) {
+      const it = document.createElement("div"); it.textContent = `＋ 新增「${q}」`;
+      it.onmousedown = (e) => { e.preventDefault(); add(q); }; dd.appendChild(it);
+    }
+    opts.slice(0, 50).forEach((o) => {
+      const it = document.createElement("div"); it.textContent = o;
+      it.onmousedown = (e) => { e.preventDefault(); add(o); }; dd.appendChild(it);
+    });
+    dd.style.display = dd.children.length ? "block" : "none";
+  };
+  input.addEventListener("focus", showDD);
+  input.addEventListener("input", showDD);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && allowNew && input.value.trim()) { e.preventDefault(); add(input.value); }
+    else if (e.key === "Backspace" && !input.value && vals.length) { vals.pop(); renderChips(); onChange(); showDD(); }
+  });
+  box.addEventListener("click", () => input.focus());
+  document.addEventListener("click", (e) => { if (!box.contains(e.target)) dd.style.display = "none"; });
+  return { values: () => vals.slice(), set: (arr) => { vals.length = 0; (arr || []).forEach((v) => { if (v && !vals.includes(v)) vals.push(v); }); renderChips(); } };
+}
+let venueIncC, venueExcC, kwIncC, kwExcC;
+const kwSeen = new Set();  // 用过的关键字（下拉候选）
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {
@@ -117,19 +176,21 @@ async function api(path, body) {
   return r.json();
 }
 
-// 读表单拼 criteria（空串已剔除）
+// 读表单拼 criteria
 function buildCriteria() {
+  const dv = $("date").value;
+  const [tMin, tMax] = $("timeBucket").value ? $("timeBucket").value.split(",").map(Number) : [null, null];
   return {
-    date: $("date").value || null,
-    startMin: mins("tMin"), startMax: mins("tMax"),
+    date: dv === "" ? null : dateForOffset(Number(dv)),
+    startMin: tMin, startMax: tMax,
     durMin: num("durMin"),
     origin: radio("origin"), mode: radio("mode"),
     commuteMax: num("commuteMax"), includeUnknownCommute: $("unkCommute").checked,
-    venueInclude: list("venueInc"), venueExclude: list("venueExc"),
+    venueInclude: venueIncC.values(), venueExclude: venueExcC.values(),
     priceMax: num("priceMax"),
     appliedRange: range("apMin", "apMax"), totalRange: range("toMin", "toMax"),
     onlyOpen: $("onlyOpen").checked,
-    kwInclude: list("kwInc"), kwExclude: list("kwExc"),
+    kwInclude: kwIncC.values(), kwExclude: kwExcC.values(),
   };
 }
 
@@ -183,11 +244,24 @@ function applyOrigins(o) {
   $("banner").style.display = !o.home?.has_coord && !o.company?.has_coord ? "block" : "none";
 }
 
+// 场馆下拉候选：库里出现过的馆名 + 统一名；关键字下拉候选：用过的词 + 球局标签
+const venueOptions = () => [...new Set(window._games.flatMap((g) => [g.venue_name, g.canonical_name]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
+const kwOptions = () => [...new Set([...kwSeen, ...window._games.flatMap((g) => parseTags(g.tags))])].sort((a, b) => a.localeCompare(b, "zh"));
+function saveKeywords() {
+  api("/api/keywords", { include: kwIncC.values(), exclude: kwExcC.values() })
+    .catch((e) => { $("status").textContent = "关键字保存失败：" + e; });
+}
+
 async function init() {
   const [cfg, org] = await Promise.all([api("/api/config"), api("/api/origins")]);
-  $("kwInc").value = (cfg.keywords?.include || []).join(",");
-  $("kwExc").value = (cfg.keywords?.exclude || []).join(",");
-  $("venues").innerHTML = (cfg.canonical_names || []).map((n) => `<option value="${esc(n)}">`).join("");
+  venueIncC = makeChips("venueInc", venueOptions, { onChange: render });
+  venueExcC = makeChips("venueExc", venueOptions, { onChange: render });
+  const kwChanged = () => { [...kwIncC.values(), ...kwExcC.values()].forEach((v) => kwSeen.add(v)); render(); saveKeywords(); };
+  kwIncC = makeChips("kwInc", kwOptions, { allowNew: true, onChange: kwChanged });
+  kwExcC = makeChips("kwExc", kwOptions, { allowNew: true, onChange: kwChanged });
+  (cfg.keywords?.include || []).concat(cfg.keywords?.exclude || []).forEach((v) => kwSeen.add(v));
+  kwIncC.set(cfg.keywords?.include || []);
+  kwExcC.set(cfg.keywords?.exclude || []);
   applyOrigins(org);
   await loadGames();
   // 刷新网页时若后台拉取/通勤还在跑，恢复进度显示并禁用对应按钮
@@ -198,18 +272,11 @@ async function init() {
   } catch (e) { /* 状态查不到不影响主流程 */ }
 }
 
-// 筛选控件、出发地、方式、排序：改动即重渲染
-document.querySelectorAll("#form input, header input, #sortBy").forEach((el) => {
+// 筛选控件、出发地、方式、排序：改动即重渲染（场馆/关键字胶囊通过各自 onChange 触发；关键字另存库）
+document.querySelectorAll("#form input, #form select, header input, #sortBy").forEach((el) => {
   el.addEventListener("input", render);
   el.addEventListener("change", render);
 });
-// 关键字改完（失焦/回车）即存库，下次打开自动回填
-for (const id of ["kwInc", "kwExc"]) {
-  $(id).addEventListener("change", () => {
-    api("/api/keywords", { include: list("kwInc"), exclude: list("kwExc") })
-      .catch((e) => { $("status").textContent = "关键字保存失败：" + e; });
-  });
-}
 document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; render(); }));
 $("tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr.row");
