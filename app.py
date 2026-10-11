@@ -84,12 +84,11 @@ def create_app(conn, config):
     return app
 
 if __name__ == "__main__":
-    import sys
-    try:
+    try:  # config.json 可选：缺省即用默认（端口 8765 / 无关键字预设 / 场馆全自动）
         with open("config.json", encoding="utf-8") as f:
             cfg = json.load(f)
     except FileNotFoundError:
-        sys.exit("缺 config.json，请先：cp config.example.json config.json，再填家/公司地址与规范场馆")
+        cfg = {}
     conn = db.connect("games.db")
     db.init_schema(conn)
     port = cfg.get("port", 8765)
