@@ -1,5 +1,6 @@
 # platforms/flashx.py
 import json
+import urllib.parse, urllib.request
 
 def _to_float(v):
     try:
@@ -46,7 +47,6 @@ def parse_games(resp_text):
 
 
 # ---- 网络抓取（手测）----
-import urllib.parse, urllib.request
 
 _URL = "https://flash.flashxsport.com/flash/activity/list"
 

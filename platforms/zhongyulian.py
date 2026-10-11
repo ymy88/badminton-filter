@@ -1,5 +1,6 @@
 # platforms/zhongyulian.py
 import json
+import urllib.request
 from datetime import timedelta
 
 def _split_time(t):
@@ -55,7 +56,6 @@ def parse_games(resp_text, day, today):
 
 
 # ---- 网络抓取（手测）----
-import urllib.request
 
 _URL = "https://service2.zhongyulian.com/wxapi.php"
 _PAGE = 10

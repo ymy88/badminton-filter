@@ -40,6 +40,8 @@ def enrich_venue(conn, game, canonical_list, origins_ll):
                         (origin, pk)).fetchone():
             continue
         m = commute.route_minutes(oll, dest)
+        if m["drive_min"] is None and m["transit_min"] is None:
+            continue  # 完全失败不缓存，下次刷新重算
         conn.execute("INSERT OR REPLACE INTO commute(origin,place_key,drive_min,transit_min,computed_at)"
                      " VALUES(?,?,?,?,datetime('now'))",
                      (origin, pk, m["drive_min"], m["transit_min"]))
@@ -56,16 +58,16 @@ def _call(source, fn, *args):
 
 def _fetch_zhongyulian(cr, today):
     games = []
-    for day in range(4):  # 0/1/2 + 3(「两天以后」大桶，日期按 today+3 近似)
+    for day in range(3):  # 今天/明天/后天
         text, bad = _call("zhongyulian", zhongyulian.fetch, cr, day)
         if bad:
             return games, True
         games += zhongyulian.parse_games(text, day, today)
     return games, False
 
-def _fetch_flashx(cr, today, days):
+def _fetch_flashx(cr, today):
     games = []
-    for i in range(days):
+    for i in range(3):  # 今天/明天/后天
         d = (today + timedelta(days=i)).isoformat()
         page, pages = 1, 1
         while page <= pages:
@@ -80,25 +82,56 @@ def _fetch_flashx(cr, today, days):
             page += 1
     return games, False
 
+def seed_canonical_venues(conn, config):
+    # config → db：按 canonical_name 幂等写入，已存在则更新并保留原 id
+    for c in config.get("canonical_venues") or []:
+        vals = (c.get("lat"), c.get("lng"),
+                json.dumps(c.get("name_patterns") or [], ensure_ascii=False),
+                json.dumps(c.get("platform_ids") or [], ensure_ascii=False))
+        row = conn.execute("SELECT id FROM canonical_venues WHERE canonical_name=?",
+                           (c["canonical_name"],)).fetchone()
+        if row:
+            conn.execute("UPDATE canonical_venues SET lat=?,lng=?,name_patterns=?,platform_ids=?"
+                         " WHERE id=?", vals + (row["id"],))
+        else:
+            conn.execute("INSERT INTO canonical_venues(lat,lng,name_patterns,platform_ids,"
+                         "canonical_name) VALUES(?,?,?,?,?)", vals + (c["canonical_name"],))
+    conn.commit()
+
+def load_canonical_list(conn):
+    return [{"id": r["id"], "canonical_name": r["canonical_name"],
+             "lat": r["lat"], "lng": r["lng"],
+             "name_patterns": json.loads(r["name_patterns"] or "[]"),
+             "platform_ids": json.loads(r["platform_ids"] or "[]")}
+            for r in conn.execute("SELECT id, canonical_name, lat, lng, name_patterns,"
+                                  " platform_ids FROM canonical_venues")]
+
 def refresh(conn, creds, config):
     today = date.today()
-    canonical = config.get("canonical_venues") or []
+    seed_canonical_venues(conn, config)
+    canonical = load_canonical_list(conn)
     origins_ll = {r["key"]: f"{r['lng']},{r['lat']}"
                   for r in conn.execute("SELECT key,lat,lng FROM origins")
                   if r["lat"] is not None and r["lng"] is not None}
-    games, auth_failed = [], []
+    games, auth_failed, errors = [], [], []
     for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today)),
-                        ("flashx", lambda c: _fetch_flashx(c, today, config.get("flashx_days", 7)))):
+                        ("flashx", lambda c: _fetch_flashx(c, today))):
         if source not in creds:
             continue  # 未抓到凭证的平台直接跳过
         try:
             got, bad = run(creds[source])
-        except Exception:  # 网络异常不拖垮另一平台
-            got, bad = [], False
+        except Exception:  # 单平台网络异常不拖垮另一平台，记入 errors
+            errors.append(source)
+            continue
         games += got
         if bad:
             auth_failed.append(source)
+    upsert_games(conn, games)  # 先入库，保证 enrich 异常不丢球局
     for g in games:
-        enrich_venue(conn, g, canonical, origins_ll)
-    upsert_games(conn, games)
-    return {"ok": not auth_failed, "count": len(games), "auth_failed": auth_failed}
+        try:
+            enrich_venue(conn, g, canonical, origins_ll)
+        except Exception:  # 单个场馆的高德/编码异常只跳过该场馆
+            pass
+    upsert_games(conn, games)  # 写回 enrich 补上的 canonical_id/坐标
+    return {"ok": not auth_failed and not errors, "count": len(games),
+            "auth_failed": auth_failed, "errors": errors}
