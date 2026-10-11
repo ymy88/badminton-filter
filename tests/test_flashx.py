@@ -29,6 +29,16 @@ def test_showcost_bad():
     assert f.parse_games(_resp([_rec(showCost="")]))[0]["price"] is None
     assert f.parse_games(_resp([_rec(showCost="面议")]))[0]["price"] is None
 
+def test_missing_showcost_price_none():
+    r = _rec(); r["data"].pop("showCost")
+    assert f.parse_games(_resp([r]))[0]["price"] is None
+
+def test_cross_midnight_duration_none():
+    assert f.parse_games(_resp([_rec(startTime="23:00", endTime="00:30")]))[0]["duration_min"] is None
+
 def test_non_json_or_fail_returns_empty():
     assert f.parse_games("<html>") == []
     assert f.parse_games(json.dumps({"success": False})) == []
+    assert f.parse_games("[]") == []
+    assert f.parse_games("null") == []
+    assert f.parse_games(json.dumps({"success": True, "result": None})) == []

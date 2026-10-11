@@ -10,7 +10,9 @@ def _to_float(v):
 def _dur(st, et):
     try:
         (h1, m1), (h2, m2) = (x.split(":") for x in (st, et))
-        return (int(h2)*60+int(m2)) - (int(h1)*60+int(m1))
+        d = (int(h2)*60+int(m2)) - (int(h1)*60+int(m1))
+        # 跨午夜或负时长与中羽联侧对齐，置 None
+        return d if d >= 0 else None
     except (ValueError, AttributeError):
         return None
 
@@ -19,10 +21,11 @@ def parse_games(resp_text):
         data = json.loads(resp_text)
     except (ValueError, TypeError):
         return []
-    if not data.get("success"):
+    # 非 dict（如 "[]"、"null"）直接返回空，与 Task 2 同类防护对齐
+    if not isinstance(data, dict) or not data.get("success"):
         return []
     out = []
-    for r in data.get("result", {}).get("records", []):
+    for r in (data.get("result") or {}).get("records") or []:
         d = r.get("data", {})
         st, et = d.get("startTime"), d.get("endTime")
         out.append({
