@@ -33,8 +33,19 @@ def geocode(address):
     d = _amap_get(f"{BASE}/v3/geocode/geo", {"address": address, "city": CITY})
     if not d or not d.get("geocodes"):
         return None
-    lng, lat = d["geocodes"][0]["location"].split(",")
-    return float(lat), float(lng)
+    try:
+        lng, lat = d["geocodes"][0]["location"].split(",")
+        return float(lat), float(lng)
+    except (ValueError, KeyError, IndexError, AttributeError, TypeError):
+        return None
+
+def _duration_min(resp, key):
+    # 防御式取值：结构缺失或异常一律返回 None，不抛
+    try:
+        items = ((resp or {}).get("route") or {}).get(key) or []
+        return sec_to_min(items[0].get("duration")) if items else None
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None
 
 def route_minutes(origin_ll, dest_ll):
     drive = _amap_get(f"{BASE}/v3/direction/driving",
@@ -42,7 +53,7 @@ def route_minutes(origin_ll, dest_ll):
     transit = _amap_get(f"{BASE}/v3/direction/transit/integrated",
                         {"origin": origin_ll, "destination": dest_ll,
                          "city": CITY, "cityd": CITY})
-    dm = sec_to_min(drive["route"]["paths"][0]["duration"]) if drive and drive.get("route", {}).get("paths") else None
-    tm = sec_to_min(transit["route"]["transits"][0]["duration"]) if transit and transit.get("route", {}).get("transits") else None
+    dm = _duration_min(drive, "paths")
+    tm = _duration_min(transit, "transits")
     time.sleep(0.3)  # 节流，避开 QPS
     return {"drive_min": dm, "transit_min": tm}

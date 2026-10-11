@@ -26,3 +26,18 @@ def test_route_minutes_parses(monkeypatch):
         return {"status": "1", "route": {"transits": [{"duration": "1800"}]}}
     monkeypatch.setattr(commute, "_amap_get", fake)
     assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": 20, "transit_min": 30}
+
+# 评审修复：响应结构异常（缺 duration）时置 None，不抛
+def test_route_minutes_missing_duration(monkeypatch):
+    def fake(url, params):
+        if "driving" in url:
+            return {"status": "1", "route": {"paths": [{}]}}
+        return {"status": "1", "route": {"transits": [{}]}}
+    monkeypatch.setattr(commute, "_amap_get", fake)
+    assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": None, "transit_min": None}
+
+# 评审修复：geocode 的 location 格式异常时返回 None，不抛
+def test_geocode_bad_location(monkeypatch):
+    monkeypatch.setattr(commute, "_amap_get",
+                        lambda url, params: {"status": "1", "geocodes": [{"location": "bad"}]})
+    assert commute.geocode("某地址") is None
