@@ -24,6 +24,12 @@ assert.equal(applyFilters([g({ venue_name: "万体汇" }), g({ venue_name: "荫�
 assert.equal(applyFilters([g({ venue_name: "万体汇", canonical_name: "徐家汇体育公园" }), g({ venue_name: "荫荫" })],
   { venueInclude: ["徐家汇"] }).length, 1);
 
+// 俱乐部双向筛选
+assert.equal(applyFilters([g({ club_name: "辉腾羽球" }), g({ club_name: "翎动" })],
+  { clubInclude: ["辉腾"] }).length, 1);
+assert.equal(applyFilters([g({ club_name: "辉腾羽球" }), g({ club_name: "翎动" })],
+  { clubExclude: ["辉腾"] }).length, 1);
+
 // 通勤上限（当前出发地+方式）
 assert.equal(applyFilters([g()], { origin: "home", mode: "drive_min", commuteMax: 10 }).length, 0);
 assert.equal(applyFilters([g()], { origin: "home", mode: "drive_min", commuteMax: 30 }).length, 1);
@@ -65,6 +71,10 @@ assert.equal(sortGames([g({ source_id: "a", applied_num: 2, total_num: 12 }), g(
 // 排序：已报名升序
 assert.equal(sortGames([g({ source_id: "a", applied_num: 9 }), g({ source_id: "b", applied_num: 1 })],
   "applied")[0].source_id, "b");
+// 排序：俱乐部（字符串，中文）升序；无俱乐部排最后
+const sc = sortGames([g({ source_id: "a", club_name: "乙俱乐部" }), g({ source_id: "b", club_name: "甲俱乐部" }), g({ source_id: "c", club_name: null })], "club");
+assert.equal(sc[0].source_id, "b");
+assert.equal(sc[2].source_id, "c");
 // 排序：缺失值排最后（price/start_time/open/applied 各一例，验证共用比较器）
 const sn = sortGames([g({ source_id: "a", price: null }), g({ source_id: "b", price: 10 })], "price");
 assert.equal(sn[0].source_id, "b"); assert.equal(sn[1].source_id, "a");

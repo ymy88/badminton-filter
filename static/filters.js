@@ -52,6 +52,9 @@ function applyFilters(games, criteria) {
     if (c.venueInclude?.some(Boolean) && !textHit(venueText, c.venueInclude)) return false;
     if (c.venueExclude?.length && textHit(venueText, c.venueExclude)) return false;
 
+    if (c.clubInclude?.some(Boolean) && !textHit(g.club_name || "", c.clubInclude)) return false;
+    if (c.clubExclude?.length && textHit(g.club_name || "", c.clubExclude)) return false;
+
     if (c.kwInclude?.some(Boolean) && !textHit(g.raw_text || "", c.kwInclude)) return false;
     if (c.kwExclude?.length && textHit(g.raw_text || "", c.kwExclude)) return false;
 
@@ -69,6 +72,7 @@ function sortKey(by, origin, mode) {
     case "open": return (g) =>
       g.total_num != null && g.applied_num != null ? g.total_num - g.applied_num : null;
     case "applied": return (g) => g.applied_num;
+    case "club": return (g) => g.club_name;  // 字符串排序
     default: return null;
   }
 }
@@ -78,13 +82,14 @@ function sortGames(games, by, origin, mode) {
   const out = games.slice();
   const key = sortKey(by, origin, mode);
   if (!key) return out;
-  const isNull = (v) => v == null || Number.isNaN(v);
+  const isNull = (v) => v == null || v === "" || Number.isNaN(v);
   out.sort((a, b) => {
     const x = key(a), y = key(b);
     if (isNull(x) && isNull(y)) return 0;
     if (isNull(x)) return 1;
     if (isNull(y)) return -1;
-    return x - y;
+    return (typeof x === "string" || typeof y === "string")
+      ? String(x).localeCompare(String(y), "zh") : x - y;  // 字符串(俱乐部)按中文排序
   });
   return out;
 }

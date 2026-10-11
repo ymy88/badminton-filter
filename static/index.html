@@ -65,6 +65,7 @@
       <option value="price">价格</option>
       <option value="open">剩余空位</option>
       <option value="applied">已报名</option>
+      <option value="club">俱乐部</option>
     </select>
   </label>
   <button id="addrBtn">设置地址</button>
@@ -100,6 +101,8 @@
     <div class="f"><label><input type="checkbox" id="onlyOpen">只看还有空位</label></div>
     <div class="f"><span>场馆只看</span><div class="chipbox" id="venueInc"></div></div>
     <div class="f"><span>场馆不看</span><div class="chipbox" id="venueExc"></div></div>
+    <div class="f"><span>俱乐部只看</span><div class="chipbox" id="clubInc"></div></div>
+    <div class="f"><span>俱乐部不看</span><div class="chipbox" id="clubExc"></div></div>
     <div class="f"><span>关键字只找</span><div class="chipbox" id="kwInc"></div></div>
     <div class="f"><span>关键字排除</span><div class="chipbox" id="kwExc"></div></div>
   </aside>
@@ -107,7 +110,7 @@
     <div id="count" class="muted"></div>
     <table>
       <thead><tr>
-        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆</th><th>俱乐部</th>
+        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆</th><th class="s" data-sort="club">俱乐部</th>
         <th class="s" data-sort="commute">通勤</th><th class="s" data-sort="price">价格</th>
         <th class="s" data-sort="applied">报名</th><th>来源</th><th>标签</th>
       </tr></thead>
@@ -169,7 +172,7 @@ function makeChips(boxId, getOptions, { allowNew = false, onChange = () => {} } 
   document.addEventListener("click", (e) => { if (!box.contains(e.target)) dd.style.display = "none"; });
   return { values: () => vals.slice(), set: (arr) => { vals.length = 0; (arr || []).forEach((v) => { if (v && !vals.includes(v)) vals.push(v); }); renderChips(); } };
 }
-let venueIncC, venueExcC, kwIncC, kwExcC;
+let venueIncC, venueExcC, clubIncC, clubExcC, kwIncC, kwExcC;
 const kwSeen = new Set();  // 用过的关键字（下拉候选）
 
 async function api(path, body) {
@@ -192,6 +195,7 @@ function buildCriteria() {
     origin: radio("origin"), mode: radio("mode"),
     commuteMax: num("commuteMax"), includeUnknownCommute: $("unkCommute").checked,
     venueInclude: venueIncC.values(), venueExclude: venueExcC.values(),
+    clubInclude: clubIncC.values(), clubExclude: clubExcC.values(),
     priceMax: num("priceMax"),
     appliedRange: range("apMin", "apMax"), totalRange: range("toMin", "toMax"),
     onlyOpen: $("onlyOpen").checked,
@@ -251,6 +255,7 @@ function applyOrigins(o) {
 
 // 场馆下拉候选：库里出现过的馆名 + 统一名；关键字下拉候选：用过的词 + 球局标签
 const venueOptions = () => [...new Set(window._games.flatMap((g) => [g.venue_name, g.canonical_name]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
+const clubOptions = () => [...new Set(window._games.map((g) => g.club_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
 const kwOptions = () => [...new Set([...kwSeen, ...window._games.flatMap((g) => parseTags(g.tags))])].sort((a, b) => a.localeCompare(b, "zh"));
 function saveKeywords() {
   api("/api/keywords", { include: kwIncC.values(), exclude: kwExcC.values() })
@@ -261,6 +266,8 @@ async function init() {
   const [cfg, org] = await Promise.all([api("/api/config"), api("/api/origins")]);
   venueIncC = makeChips("venueInc", venueOptions, { onChange: render });
   venueExcC = makeChips("venueExc", venueOptions, { onChange: render });
+  clubIncC = makeChips("clubInc", clubOptions, { onChange: render });
+  clubExcC = makeChips("clubExc", clubOptions, { onChange: render });
   const kwChanged = () => { [...kwIncC.values(), ...kwExcC.values()].forEach((v) => kwSeen.add(v)); render(); saveKeywords(); };
   kwIncC = makeChips("kwInc", kwOptions, { allowNew: true, onChange: kwChanged });
   kwExcC = makeChips("kwExc", kwOptions, { allowNew: true, onChange: kwChanged });
