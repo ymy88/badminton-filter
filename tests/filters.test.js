@@ -33,10 +33,16 @@ const unk = g({ commute: { home: { drive_min: null, transit_min: null }, company
 assert.equal(applyFilters([unk], { origin: "home", mode: "drive_min", commuteMax: 30, includeUnknownCommute: true }).length, 1);
 assert.equal(applyFilters([unk], { origin: "home", mode: "drive_min", commuteMax: 30, includeUnknownCommute: false }).length, 0);
 
-// 时长下限：未知时长（跨午夜 null）在设了下限时不满足；没设下限时不受影响
+// 时长分档：未知时长（跨午夜 null）设了档即剔除；没设档不受影响
 const durNull = g({ duration_min: null });
-assert.equal(applyFilters([durNull], { durMin: 60 }).length, 0);
-assert.equal(applyFilters([durNull], { durMin: null }).length, 1);
+assert.equal(applyFilters([durNull], { durRange: [60, 120] }).length, 0);
+assert.equal(applyFilters([durNull], { durRange: null }).length, 1);
+// 分档边界：120 分钟属于「2小时」[120,180)，不属于「1小时」[60,120)（上界开区间）
+assert.equal(applyFilters([g({ duration_min: 120 })], { durRange: [120, 180] }).length, 1);
+assert.equal(applyFilters([g({ duration_min: 120 })], { durRange: [60, 120] }).length, 0);
+// 90 分钟(1.5h)归「1小时」档；4小时及以上 = [240,∞)
+assert.equal(applyFilters([g({ duration_min: 90 })], { durRange: [60, 120] }).length, 1);
+assert.equal(applyFilters([g({ duration_min: 300 })], { durRange: [240, Infinity] }).length, 1);
 
 // 还有空位
 assert.equal(applyFilters([g({ applied_num: 12, total_num: 12 }), g({ applied_num: 6, total_num: 12 })],

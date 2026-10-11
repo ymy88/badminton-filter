@@ -25,8 +25,11 @@ function applyFilters(games, criteria) {
       if (c.startMax != null && s > c.startMax) return false;
     }
 
-    // 时长未知（跨午夜 null）在设了下限时不算满足
-    if (c.durMin != null && !(g.duration_min != null && g.duration_min >= c.durMin)) return false;
+    // 时长分档 [min,max)（max 可为 Infinity）；时长未知（跨午夜 null）设了档即剔除
+    if (c.durRange) {
+      const d = g.duration_min;
+      if (d == null || d < c.durRange[0] || d >= c.durRange[1]) return false;
+    }
 
     if (c.origin && c.mode && c.commuteMax != null) {
       const v = g.commute?.[c.origin]?.[c.mode];

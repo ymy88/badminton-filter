@@ -88,7 +88,10 @@
       <option value="">不限</option><option value="360,600">早上 6–10 点</option>
       <option value="600,840">上午 10–下午 2 点</option><option value="840,1080">下午 2–6 点</option>
       <option value="1080,1320">晚上 6–10 点</option></select></div>
-    <div class="f"><span>时长下限（分钟）</span><input type="number" id="durMin" min="0"></div>
+    <div class="f"><span>时长</span><select id="dur">
+      <option value="">不限</option><option value="60,120">1小时</option>
+      <option value="120,180">2小时</option><option value="180,240">3小时</option>
+      <option value="240,">4小时及以上</option></select></div>
     <div class="f"><span>通勤上限（分钟，按当前出发地/方式）</span><input type="number" id="commuteMax" min="0">
       <label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
     <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
@@ -180,10 +183,12 @@ async function api(path, body) {
 function buildCriteria() {
   const dv = $("date").value;
   const [tMin, tMax] = $("timeBucket").value ? $("timeBucket").value.split(",").map(Number) : [null, null];
+  const db = $("dur").value;  // "min,max"（"240," 表示 max=∞）
+  const durRange = db ? (([a, b]) => [Number(a), b === "" ? Infinity : Number(b)])(db.split(",")) : null;
   return {
     date: dv === "" ? null : dateForOffset(Number(dv)),
     startMin: tMin, startMax: tMax,
-    durMin: num("durMin"),
+    durRange: durRange,
     origin: radio("origin"), mode: radio("mode"),
     commuteMax: num("commuteMax"), includeUnknownCommute: $("unkCommute").checked,
     venueInclude: venueIncC.values(), venueExclude: venueExcC.values(),
