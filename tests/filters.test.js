@@ -56,9 +56,18 @@ assert.equal(sortGames([g({ source_id: "a", applied_num: 2, total_num: 12 }), g(
 // 排序：已报名升序
 assert.equal(sortGames([g({ source_id: "a", applied_num: 9 }), g({ source_id: "b", applied_num: 1 })],
   "applied")[0].source_id, "b");
-// 排序：缺失值排最后（price 为 null 的排在后面）
+// 排序：缺失值排最后（price/start_time/open/applied 各一例，验证共用比较器）
 const sn = sortGames([g({ source_id: "a", price: null }), g({ source_id: "b", price: 10 })], "price");
-assert.equal(sn[0].source_id, "b");
-assert.equal(sn[1].source_id, "a");
+assert.equal(sn[0].source_id, "b"); assert.equal(sn[1].source_id, "a");
+assert.equal(sortGames([g({ source_id: "a", start_time: null }), g({ source_id: "b", start_time: "08:00" })], "start_time")[1].source_id, "a");
+assert.equal(sortGames([g({ source_id: "a", total_num: null }), g({ source_id: "b", applied_num: 1, total_num: 12 })], "open")[1].source_id, "a");
+assert.equal(sortGames([g({ source_id: "a", applied_num: null }), g({ source_id: "b", applied_num: 1 })], "applied")[1].source_id, "a");
+// sortGames 不改入参；未知 by 返回副本
+const inp = [g({ source_id: "a" })]; sortGames(inp, "price"); assert.equal(inp[0].source_id, "a");
+assert.equal(sortGames(inp, "nope").length, 1);
+
+// 回归：include 仅含空串视为无筛选（不误剔全部）
+assert.equal(applyFilters([g({ raw_text: "练球" }), g({ raw_text: "双打" })], { kwInclude: [""] }).length, 2);
+assert.equal(applyFilters([g({ venue_name: "万体汇" })], { venueInclude: [""] }).length, 1);
 
 console.log("filters.js OK");

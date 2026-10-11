@@ -44,10 +44,11 @@ function applyFilters(games, criteria) {
 
     if (c.onlyOpen && !(g.applied_num < g.total_num)) return false;
 
-    if (c.venueInclude?.length && !textHit(g.venue_name || "", c.venueInclude)) return false;
+    // include 用 some(Boolean)：仅含空串的列表视为「无筛选」，不误剔全部
+    if (c.venueInclude?.some(Boolean) && !textHit(g.venue_name || "", c.venueInclude)) return false;
     if (c.venueExclude?.length && textHit(g.venue_name || "", c.venueExclude)) return false;
 
-    if (c.kwInclude?.length && !textHit(g.raw_text || "", c.kwInclude)) return false;
+    if (c.kwInclude?.some(Boolean) && !textHit(g.raw_text || "", c.kwInclude)) return false;
     if (c.kwExclude?.length && textHit(g.raw_text || "", c.kwExclude)) return false;
 
     return true;
