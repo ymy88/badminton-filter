@@ -404,7 +404,7 @@ async function startCompute(baseMsg) {
 $("commuteBtn").onclick = () => startCompute("");
 
 $("capBtn").onclick = async () => {
-  $("status").textContent = "抓取中：请打开对应小程序刷一下；若抓不到先关 VPN/sing-box…";
+  $("status").textContent = "抓取中：请在桌面微信里打开对应小程序刷一下列表…";
   try {
     const r = await api("/api/creds/capture", {});
     const got = Object.keys(r).filter((k) => r[k]).map((k) => SRC[k] || k);
