@@ -93,6 +93,19 @@ def test_keywords_save_and_load_roundtrip():
     assert client.post("/api/keywords", json={"include": ["练球", ""], "exclude": ["教练"]}).get_json()["ok"] is True
     assert client.get("/api/config").get_json()["keywords"] == {"include": ["练球"], "exclude": ["教练"]}
 
+def test_keywords_history_is_append_only():
+    # 打过的词进历史(永久)，从筛选里删掉不影响历史
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    client = appmod.create_app(conn, {}).test_client()
+    client.post("/api/keywords", json={"include": ["练球"], "exclude": []})
+    assert client.get("/api/config").get_json()["kw_history"] == ["练球"]
+    client.post("/api/keywords", json={"include": [], "exclude": []})  # 删掉筛选里的词
+    cfg = client.get("/api/config").get_json()
+    assert cfg["keywords"]["include"] == []        # 筛选清空
+    assert cfg["kw_history"] == ["练球"]            # 历史仍在
+    client.post("/api/keywords", json={"include": ["练球", "对抗"], "exclude": []})
+    assert client.get("/api/config").get_json()["kw_history"] == ["练球", "对抗"]  # 累积去重
+
 def test_save_origins_geocodes_and_clears_commute(monkeypatch):
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
@@ -124,7 +137,7 @@ def test_get_origins_and_config():
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.0,121.0)")
     conn.execute("INSERT INTO canonical_venues(canonical_name) VALUES('馆A')")
-    conn.execute("INSERT INTO settings(key,value) VALUES('keywords','{\"include\":[\"x\"],\"exclude\":[]}')")
+    conn.execute("INSERT INTO keywords(word,in_include) VALUES('x',1)")
     conn.commit()
     c = appmod.create_app(conn, {}).test_client()
     o = c.get("/api/origins").get_json()

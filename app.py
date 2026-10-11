@@ -42,19 +42,26 @@ def create_app(conn, config, db_path=None):
     def get_config():
         names = [r["canonical_name"] for r in
                  conn.execute("SELECT canonical_name FROM canonical_venues ORDER BY id")]
-        row = conn.execute("SELECT value FROM settings WHERE key='keywords'").fetchone()
-        kw = json.loads(row["value"]) if row else {"include": [], "exclude": []}
-        return jsonify({"keywords": kw, "canonical_names": names})
+        rows = conn.execute("SELECT word,in_include,in_exclude FROM keywords ORDER BY rowid").fetchall()
+        kw = {"include": [r["word"] for r in rows if r["in_include"]],
+              "exclude": [r["word"] for r in rows if r["in_exclude"]]}
+        hist = [r["word"] for r in rows]  # 全部用过的词（永久历史，供下拉）
+        return jsonify({"keywords": kw, "kw_history": hist, "canonical_names": names})
 
     @app.post("/api/keywords")
     def save_keywords():
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"ok": False, "msg": "body 须为 JSON 对象"}), 400
-        kw = {d: [s for s in (body.get(d) or []) if isinstance(s, str) and s]
-              for d in ("include", "exclude")}  # 剔空串，防脏数据
-        conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('keywords',?)",
-                     (json.dumps(kw, ensure_ascii=False),))
+        inc = {s for s in (body.get("include") or []) if isinstance(s, str) and s}
+        exc = {s for s in (body.get("exclude") or []) if isinstance(s, str) and s}
+        for w in inc | exc:  # 新词建行（已存在忽略）——行永不删除 = 永久历史
+            conn.execute("INSERT OR IGNORE INTO keywords(word) VALUES(?)", (w,))
+        conn.execute("UPDATE keywords SET in_include=0, in_exclude=0")  # 重置后按当前选择置位
+        for w in inc:
+            conn.execute("UPDATE keywords SET in_include=1 WHERE word=?", (w,))
+        for w in exc:
+            conn.execute("UPDATE keywords SET in_exclude=1 WHERE word=?", (w,))
         conn.commit()
         return jsonify({"ok": True})
 

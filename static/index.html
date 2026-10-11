@@ -271,7 +271,7 @@ async function init() {
   const kwChanged = () => { [...kwIncC.values(), ...kwExcC.values()].forEach((v) => kwSeen.add(v)); render(); saveKeywords(); };
   kwIncC = makeChips("kwInc", kwOptions, { allowNew: true, onChange: kwChanged });
   kwExcC = makeChips("kwExc", kwOptions, { allowNew: true, onChange: kwChanged });
-  (cfg.keywords?.include || []).concat(cfg.keywords?.exclude || []).forEach((v) => kwSeen.add(v));
+  (cfg.kw_history || []).forEach((v) => kwSeen.add(v));  // 打过的词永久进下拉候选
   kwIncC.set(cfg.keywords?.include || []);
   kwExcC.set(cfg.keywords?.exclude || []);
   applyOrigins(org);
