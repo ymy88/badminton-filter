@@ -232,7 +232,7 @@ function rowHtml(g, origin) {
     <td><span class="src">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
     <tr class="detail" style="display:none"><td colspan="9">${esc(g.raw_text || "（无原文）")}
 组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
-来源：${esc(SRC[g.source] || g.source)}　id：${esc(g.detail_ref || g.source_id || "—")}（供回原小程序手动查）</td></tr>`;
+回${esc(SRC[g.source] || g.source)}小程序按【${esc(g.date)} ${esc(g.start_time || "")}·${esc(g.venue_name || "")}】找这条报名；活动id ${esc(g.detail_ref || g.source_id || "—")}（仅供核对，不能直接搜）</td></tr>`;
 }
 
 function render() {
