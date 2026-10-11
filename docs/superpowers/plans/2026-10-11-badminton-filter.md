@@ -142,7 +142,6 @@ def init_schema(conn):
 ```json
 {
   "port": 8765,
-  "origins": {"home": "上海市XX区XX路XX号", "company": "上海市XX区XX路XX号"},
   "canonical_venues": [
     {"canonical_name": "徐家汇体育公园(万体汇)",
      "name_patterns": ["徐家汇体育公园", "万体汇", "徐汇体育公园综合馆"],
@@ -151,6 +150,8 @@ def init_schema(conn):
   "keywords": {"include": [], "exclude": []}
 }
 ```
+
+出发地地址**不在 config**：运行后在网页界面填，存入 db 的 `origins` 表（Task 8 的 `/api/origins`）。
 
 - [ ] **Step 4: 运行确认通过**
 
@@ -687,7 +688,7 @@ def enrich_venue(conn, game, canonical_list, origins_ll):
     conn.commit()
 ```
 
-`refresh` 串起：确保 origins 坐标（地理编码 config 地址、地址变则清 commute）→ 对两平台 fetch+parse（捕获鉴权失败）→ upsert → 逐条 enrich。鉴权失败平台计入 `auth_failed`，不中断另一平台。各平台 `fetch` 用 Task 7 的 creds 组装请求头（中羽联 POST JSON body 带 `skey`、`day`、`city:"上海"`、`cmd:"indexList"`、`limit/skip` 翻页 other 列表；闪动 GET 带 `x-access-token` 头、`date`/`pageNo` 翻页）。接口字段与请求头照 `RESEARCH.md`。
+`refresh` 串起：从 db `origins` 表读两个出发地的坐标（`origins_ll={"home":"lng,lat","company":"lng,lat"}`，缺坐标的出发地跳过其通勤，不报错）→ 对两平台 fetch+parse（捕获鉴权失败）→ upsert → 逐条 enrich。地址的地理编码与「地址变则清 commute」发生在界面保存地址时（Task 8 `/api/origins`），refresh 只读 origins 表现成坐标。鉴权失败平台计入 `auth_failed`，不中断另一平台。各平台 `fetch` 用 Task 7 的 creds 组装请求头（中羽联 POST JSON body 带 `skey`、`day`、`city:"上海"`、`cmd:"indexList"`、`limit/skip` 翻页 other 列表；闪动 GET 带 `x-access-token` 头、`date`/`pageNo` 翻页）。接口字段与请求头照 `RESEARCH.md`。
 
 - [ ] **Step 4: 运行确认通过** → `uv run pytest tests/test_sync.py -v` → PASS
 
@@ -800,7 +801,9 @@ git commit -m "feat: 凭证读写与失效检测（区分鉴权失败与城市Fa
 - Produces: Flask app。路由：
   - `GET /` → `static/index.html`。
   - `GET /api/games` → 当前库全部球局，JSON `{"games": [...]}`。每条 `LEFT JOIN canonical_venues` 带出 `canonical_name`（未归类为 null），并按 `place_key(canonical_id, venue_key)` 关联 `commute` 表组装 `commute.home`/`commute.company`。
-  - `GET /api/config` → 前端需要的配置（关键词预设、出发地名、规范场馆名列表）。
+  - `GET /api/config` → 前端需要的配置（关键词预设、规范场馆名列表）。
+  - `GET /api/origins` → 当前两个出发地 `{"home": {"address","has_coord"}, "company": {...}}`，供界面回填。
+  - `POST /api/origins` → body `{"home": "地址文字", "company": "地址文字"}`：对每个**有变化**的地址调 `commute.geocode` 得坐标、写 `origins` 表、清掉该出发地的 `commute` 行（坐标变了）。地理编码失败 → 该出发地返回 `{"ok": false, "msg": "地址查不到，填具体些"}`，不写坏坐标。返回每个出发地的结果。
   - `POST /api/refresh` → 调 `sync.refresh`，返回 `{"ok", "count", "auth_failed"}`。
   - `POST /api/creds/capture` → 调 `creds.capture`，返回结果。
   - `app.create_app(conn, config)` 工厂，便于测试注入内存库。
@@ -825,13 +828,38 @@ def test_games_endpoint_attaches_commute():
     assert g["source_id"] == "1"
     assert g["commute"]["home"]["drive_min"] == 20
     assert g["commute"]["home"]["transit_min"] == 35
+
+def test_save_origins_geocodes_and_clears_commute(monkeypatch):
+    import commute
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min) VALUES('home','v:x',20,30)")
+    conn.commit()
+    monkeypatch.setattr(commute, "geocode", lambda a: (31.2, 121.5))
+    client = appmod.create_app(conn, {}).test_client()
+    r = client.post("/api/origins", json={"home": "新址", "company": ""}).get_json()
+    row = conn.execute("SELECT address,lat,lng FROM origins WHERE key='home'").fetchone()
+    assert row["address"] == "新址" and row["lat"] == 31.2
+    # 地址变了 → 该出发地的 commute 被清
+    assert conn.execute("SELECT COUNT(*) c FROM commute WHERE origin='home'").fetchone()["c"] == 0
+
+def test_save_origins_geocode_fail_keeps_old(monkeypatch):
+    import commute
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
+    conn.commit()
+    monkeypatch.setattr(commute, "geocode", lambda a: None)
+    client = appmod.create_app(conn, {}).test_client()
+    r = client.post("/api/origins", json={"home": "乱填查不到", "company": ""}).get_json()
+    assert conn.execute("SELECT lat FROM origins WHERE key='home'").fetchone()["lat"] == 31.0  # 不覆盖
+    assert r["home"]["ok"] is False
 ```
 
 - [ ] **Step 2: 运行确认失败** → FAIL
 
 - [ ] **Step 3: 实现 app.py**
 
-`create_app(conn, config)`：注册路由。`/api/games` 用 `SELECT games.*, canonical_venues.canonical_name FROM games LEFT JOIN canonical_venues ON games.canonical_id=canonical_venues.id`，每条再按 `place_key(canonical_id, venue_key)` 查 `commute` 的 home/company 两行，组装 `g["canonical_name"]` 与 `g["commute"]={"home":{...},"company":{...}}`。`GET /` 用 `send_from_directory("static","index.html")`。顶层 `app.py` main：读 `config.json`、连 `games.db`、`init_schema`、`threading.Timer` 开浏览器 `webbrowser.open`、`app.run(port=config["port"])`。
+`create_app(conn, config)`：注册路由。`/api/games` 用 `SELECT games.*, canonical_venues.canonical_name FROM games LEFT JOIN canonical_venues ON games.canonical_id=canonical_venues.id`，每条再按 `place_key(canonical_id, venue_key)` 查 `commute` 的 home/company 两行，组装 `g["canonical_name"]` 与 `g["commute"]={"home":{...},"company":{...}}`。`/api/origins` 读写 `origins` 表；`POST` 时对地址有变化的出发地调 `commute.geocode`，成功则更新坐标并 `DELETE FROM commute WHERE origin=?` 清该出发地缓存，失败则该出发地返回错误、不动旧值。`GET /` 用 `send_from_directory("static","index.html")`。顶层 `app.py` main：读 `config.json`、连 `games.db`、`init_schema`、`threading.Timer` 开浏览器 `webbrowser.open`、`app.run(port=config["port"])`。
 
 - [ ] **Step 4: 运行确认通过** → PASS
 
@@ -926,15 +954,15 @@ git commit -m "feat: 前端筛选与排序纯函数（node 自测）"
 - Create: `static/index.html`
 
 **Interfaces:**
-- Consumes: `/api/games`、`/api/config`、`/api/refresh`、`/api/creds/capture`、`filters.js`。
+- Consumes: `/api/games`、`/api/config`、`/api/origins`、`/api/refresh`、`/api/creds/capture`、`filters.js`。
 
 - [ ] **Step 1: 搭页面骨架**
 
-单 HTML：顶栏（出发地 家/公司 单选、刷新按钮、凭证状态条）、左栏筛选表单（日期/时间范围/时长/通勤方式+上限/价格/人数/还有空位/场馆 只看·不看/关键字 只找·排除）、右栏列表 `<table>`。引 `filters.js`。
+单 HTML：顶栏（出发地 家/公司 单选、「设置地址」入口、刷新按钮、凭证状态条）、左栏筛选表单（日期/时间范围/时长/通勤方式+上限/价格/人数/还有空位/场馆 只看·不看/关键字 只找·排除）、右栏列表 `<table>`。「设置地址」展开两个输入框（家、公司地址）+ 保存按钮。引 `filters.js`。
 
-- [ ] **Step 2: 数据流**
+- [ ] **Step 2: 数据流 + 地址设置**
 
-页面载入 `GET /api/config`（填关键词预设、出发地名）+ `GET /api/games` 存全量到 `window._games`。任何筛选控件 `input/change` → 读表单拼 `criteria` → `applyFilters` + `sortGames` → 重渲染 `<tbody>`。切出发地/排序同理。零往返。
+页面载入 `GET /api/config`（填关键词预设）+ `GET /api/origins`（回填家/公司地址；两者皆空或缺坐标 → 提示「请先在『设置地址』填家和公司地址」）+ `GET /api/games` 存全量到 `window._games`。「设置地址」保存 → `POST /api/origins` → 某出发地地理编码失败则就地提示「地址查不到，填具体些」；成功后重拉 `/api/games`（通勤已变）。任何筛选控件 `input/change` → 读表单拼 `criteria` → `applyFilters` + `sortGames` → 重渲染 `<tbody>`。切出发地/排序同理。零往返。
 
 - [ ] **Step 3: 列表与详情**
 
@@ -946,7 +974,7 @@ git commit -m "feat: 前端筛选与排序纯函数（node 自测）"
 
 - [ ] **Step 5: 手动验证 + 提交**
 
-手测：`uv run app.py` → 浏览器自动打开 → 刷新拉到两平台球局 → 各筛选项逐个验证 → 切出发地通勤变化 → 点详情 → 制造凭证失效走一遍抓取。通过后：
+手测：`uv run app.py` → 浏览器自动打开 → 在「设置地址」填家/公司地址（验证地理编码成功、以及乱填时的「查不到」提示）→ 刷新拉到两平台球局 → 各筛选项逐个验证 → 切出发地通勤变化 → 点详情 → 制造凭证失效走一遍抓取。通过后：
 
 ```bash
 git add static/index.html
