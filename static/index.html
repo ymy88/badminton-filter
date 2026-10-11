@@ -52,6 +52,10 @@
 </head>
 <body>
 <header id="top">
+  <span>通勤方式
+    <label><input type="radio" name="mode" value="drive_min" checked>驾车</label>
+    <label><input type="radio" name="mode" value="transit_min">公交</label>
+  </span>
   <label>排序
     <select id="sortBy">
       <option value="start_time">开始时间</option>
@@ -92,10 +96,7 @@
       <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
     </div>
     <div class="grp">
-      <div class="f"><span>通勤方式</span>
-        <label><input type="radio" name="mode" value="drive_min" checked>驾车</label>
-        <label><input type="radio" name="mode" value="transit_min">公交</label></div>
-      <div class="f"><span>家通勤上限（分钟）</span><input type="number" id="homeCommuteMax" min="0"></div>
+      <div class="f"><span>家通勤上限（分钟，按当前方式）</span><input type="number" id="homeCommuteMax" min="0"></div>
       <div class="f"><span>公司通勤上限（分钟）</span><input type="number" id="companyCommuteMax" min="0"></div>
       <div class="f"><label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
     </div>
