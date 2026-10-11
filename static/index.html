@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>羽毛球球局筛选</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", sans-serif; color: #222; background: #f5f6f8; }
+  header { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid #ddd; }
+  header.bad { background: #fde8e8; }
+  header label { margin-right: 6px; }
+  button { cursor: pointer; padding: 4px 12px; }
+  #banner { padding: 8px 16px; background: #fff3cd; display: none; }
+  #addr { display: none; padding: 10px 16px; background: #fafafa; border-bottom: 1px solid #ddd; }
+  #addr div { margin: 4px 0; }
+  #addr input { width: 360px; }
+  .err { color: #c00; }
+  .ok { color: #070; }
+  main { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
+  aside { width: 260px; flex: none; background: #fff; padding: 12px; border-radius: 6px; }
+  aside .f { margin-bottom: 10px; }
+  aside .f > span { display: block; color: #666; font-size: 12px; }
+  aside input[type=number] { width: 70px; }
+  aside input[type=text] { width: 100%; }
+  section { flex: 1; min-width: 0; background: #fff; border-radius: 6px; padding: 8px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+  th.s { cursor: pointer; user-select: none; }
+  th.s:hover { background: #eef; }
+  tr.row { cursor: pointer; }
+  tr.row:hover { background: #f7faff; }
+  tr.detail td { background: #fafafa; color: #444; white-space: pre-wrap; }
+  .tag { display: inline-block; padding: 0 6px; margin: 0 3px 2px 0; background: #e8eefc; border-radius: 8px; font-size: 12px; }
+  .src { font-size: 12px; padding: 0 6px; border-radius: 3px; background: #ddd; }
+  .muted { color: #999; }
+</style>
+</head>
+<body>
+<header id="top">
+  <span>出发地
+    <label><input type="radio" name="origin" value="home" checked>家</label>
+    <label><input type="radio" name="origin" value="company">公司</label>
+  </span>
+  <span>通勤方式
+    <label><input type="radio" name="mode" value="drive_min" checked>驾车</label>
+    <label><input type="radio" name="mode" value="transit_min">公交</label>
+  </span>
+  <label>排序
+    <select id="sortBy">
+      <option value="start_time">开始时间</option>
+      <option value="commute">通勤</option>
+      <option value="price">价格</option>
+      <option value="open">剩余空位</option>
+      <option value="applied">已报名</option>
+    </select>
+  </label>
+  <button id="addrBtn">设置地址</button>
+  <button id="refreshBtn">刷新</button>
+  <button id="capBtn" style="display:none">抓取凭证</button>
+  <span id="status"></span>
+</header>
+<div id="banner">请先在『设置地址』填家和公司地址</div>
+<div id="addr">
+  <div>家地址 <input id="addrHome" type="text"> <span id="msgHome"></span></div>
+  <div>公司地址 <input id="addrCompany" type="text"> <span id="msgCompany"></span></div>
+  <div><button id="addrSave">保存</button></div>
+</div>
+<main>
+  <aside id="form">
+    <div class="f"><span>日期</span><input type="date" id="date"></div>
+    <div class="f"><span>开始时间范围</span><input type="time" id="tMin"> ~ <input type="time" id="tMax"></div>
+    <div class="f"><span>时长下限（分钟）</span><input type="number" id="durMin" min="0"></div>
+    <div class="f"><span>通勤上限（分钟，按当前出发地/方式）</span><input type="number" id="commuteMax" min="0">
+      <label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
+    <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
+    <div class="f"><span>已报名范围</span><input type="number" id="apMin" min="0"> ~ <input type="number" id="apMax" min="0"></div>
+    <div class="f"><span>总人数范围</span><input type="number" id="toMin" min="0"> ~ <input type="number" id="toMax" min="0"></div>
+    <div class="f"><label><input type="checkbox" id="onlyOpen">只看还有空位</label></div>
+    <div class="f"><span>场馆只看（逗号分隔）</span><input type="text" id="venueInc" list="venues"></div>
+    <div class="f"><span>场馆不看（逗号分隔）</span><input type="text" id="venueExc" list="venues"></div>
+    <datalist id="venues"></datalist>
+    <div class="f"><span>关键字只找（逗号分隔）</span><input type="text" id="kwInc"></div>
+    <div class="f"><span>关键字排除（逗号分隔）</span><input type="text" id="kwExc"></div>
+  </aside>
+  <section>
+    <div id="count" class="muted"></div>
+    <table>
+      <thead><tr>
+        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆</th>
+        <th class="s" data-sort="commute">通勤</th><th class="s" data-sort="price">价格</th>
+        <th class="s" data-sort="applied">报名</th><th>来源</th><th>标签</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="filters.js"></script>
+<script>
+window._games = [];
+const $ = (id) => document.getElementById(id);
+const SRC = { zhongyulian: "中羽联", flashx: "闪动" };
+const radio = (name) => document.querySelector(`input[name=${name}]:checked`).value;
+const num = (id) => ($(id).value === "" ? null : Number($(id).value));
+const list = (id) => $(id).value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+// "HH:MM" → 当日分钟数；空返回 null
+const mins = (id) => { const v = $(id).value; if (!v) return null; const [h, m] = v.split(":").map(Number); return h * 60 + m; };
+const range = (a, b) => (num(a) == null && num(b) == null ? null : [num(a) ?? 0, num(b) ?? Infinity]);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+
+// 读表单拼 criteria（空串已剔除）
+function buildCriteria() {
+  return {
+    date: $("date").value || null,
+    startMin: mins("tMin"), startMax: mins("tMax"),
+    durMin: num("durMin"),
+    origin: radio("origin"), mode: radio("mode"),
+    commuteMax: num("commuteMax"), includeUnknownCommute: $("unkCommute").checked,
+    venueInclude: list("venueInc"), venueExclude: list("venueExc"),
+    priceMax: num("priceMax"),
+    appliedRange: range("apMin", "apMax"), totalRange: range("toMin", "toMax"),
+    onlyOpen: $("onlyOpen").checked,
+    kwInclude: list("kwInc"), kwExclude: list("kwExc"),
+  };
+}
+
+// tags 格式不定：JSON 数组 → 标签；其它非空字符串 → 单个标签；空/异常 → 无
+function parseTags(t) {
+  if (!t) return [];
+  try {
+    const v = JSON.parse(t);
+    if (Array.isArray(v)) return v.map(String).filter(Boolean);
+    if (typeof v === "string" && v) return [v];
+    return [];
+  } catch (e) { return [String(t)]; }
+}
+
+const fmtCommute = (c) => {
+  if (!c) return "未知";
+  const d = c.drive_min, t = c.transit_min;
+  return `驾${d == null ? "未知" : d + "分"} / 公${t == null ? "未知" : t + "分"}`;
+};
+
+function rowHtml(g, origin) {
+  const venue = esc(g.venue_name || "") + (g.canonical_name ? `<br><span class="muted">${esc(g.canonical_name)}</span>` : "");
+  const tags = parseTags(g.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+  return `<tr class="row"><td>${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
+    <td>${g.duration_min == null ? "—" : g.duration_min + "分"}</td><td>${venue}</td>
+    <td>${fmtCommute(g.commute?.[origin])}</td><td>${g.price == null ? "—" : esc(g.price)}</td>
+    <td>${esc(g.applied_num)}/${esc(g.total_num)}</td>
+    <td><span class="src">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
+    <tr class="detail" style="display:none"><td colspan="8">${esc(g.raw_text || "（无原文）")}
+组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
+来源：${esc(SRC[g.source] || g.source)}　id：${esc(g.detail_ref || g.source_id || "—")}（供回原小程序手动查）</td></tr>`;
+}
+
+function render() {
+  const c = buildCriteria();
+  const rows = sortGames(applyFilters(window._games, c), $("sortBy").value, c.origin, c.mode);
+  $("tbody").innerHTML = rows.map((g) => rowHtml(g, c.origin)).join("");
+  $("count").textContent = `共 ${rows.length} / ${window._games.length} 场`;
+}
+
+async function loadGames() {
+  window._games = (await api("/api/games")).games;
+  render();
+}
+
+function applyOrigins(o) {
+  $("addrHome").value = o.home?.address || "";
+  $("addrCompany").value = o.company?.address || "";
+  $("banner").style.display = !o.home?.has_coord && !o.company?.has_coord ? "block" : "none";
+}
+
+async function init() {
+  const [cfg, org] = await Promise.all([api("/api/config"), api("/api/origins")]);
+  $("kwInc").value = (cfg.keywords?.include || []).join(",");
+  $("kwExc").value = (cfg.keywords?.exclude || []).join(",");
+  $("venues").innerHTML = (cfg.canonical_names || []).map((n) => `<option value="${esc(n)}">`).join("");
+  applyOrigins(org);
+  await loadGames();
+}
+
+// 筛选控件、出发地、方式、排序：改动即重渲染
+document.querySelectorAll("#form input, header input, #sortBy").forEach((el) => {
+  el.addEventListener("input", render);
+  el.addEventListener("change", render);
+});
+document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; render(); }));
+$("tbody").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr.row");
+  if (tr) { const d = tr.nextElementSibling; d.style.display = d.style.display === "none" ? "" : "none"; }
+});
+$("addrBtn").onclick = () => { const a = $("addr"); a.style.display = a.style.display === "block" ? "none" : "block"; };
+
+$("addrSave").onclick = async () => {
+  const r = await api("/api/origins", { home: $("addrHome").value, company: $("addrCompany").value });
+  let changed = false;
+  for (const [k, id] of [["home", "msgHome"], ["company", "msgCompany"]]) {
+    const x = r[k] || {};
+    $(id).className = x.ok ? "ok" : "err";
+    $(id).textContent = x.ok ? "已保存" : (x.msg || "保存失败");
+    if (x.ok && x.changed) changed = true;
+  }
+  applyOrigins(await api("/api/origins"));
+  if (changed) await loadGames();
+};
+
+$("refreshBtn").onclick = async () => {
+  $("status").textContent = "刷新中…";
+  $("status").className = "";
+  try {
+    const r = await api("/api/refresh", {});
+    const failed = r.auth_failed || [];
+    $("top").classList.toggle("bad", failed.length > 0);
+    $("capBtn").style.display = failed.length ? "" : "none";
+    let msg = `刷新完成，${r.count ?? 0} 场`;
+    if (failed.length) msg = `凭证失效：${failed.map((p) => SRC[p] || p).join("、")}（点「抓取凭证」）`;
+    if ((r.errors || []).length) msg += `；网络失败：${r.errors.map((e) => typeof e === "string" ? e : JSON.stringify(e)).join("；")}`;
+    $("status").textContent = msg;
+    await loadGames();
+  } catch (e) { $("status").textContent = "刷新失败：" + e; }
+};
+
+$("capBtn").onclick = async () => {
+  $("status").textContent = "抓取中：请打开对应小程序刷一下；若抓不到先关 VPN/sing-box…";
+  try {
+    const r = await api("/api/creds/capture", {});
+    const got = Object.keys(r).filter((k) => r[k]).map((k) => SRC[k] || k);
+    $("status").textContent = (got.length ? `已拿到新凭证：${got.join("、")}。` : "没抓到凭证。") + "请重新点「刷新」。";
+  } catch (e) { $("status").textContent = "抓取失败：" + e; }
+};
+
+init();
+</script>
+</body>
+</html>
