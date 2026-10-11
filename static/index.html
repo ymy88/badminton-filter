@@ -18,13 +18,14 @@
   .err { color: #c00; }
   .ok { color: #070; }
   main { padding: 16px; }
-  aside { background: #fff; padding: 12px; border-radius: 6px; margin-bottom: 16px;
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; align-items: start; }
+  aside { background: #fff; padding: 4px 12px; border-radius: 6px; margin-bottom: 16px; }
+  .grp { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; padding: 10px 0; }
+  .grp + .grp { border-top: 1px solid #eee; }
   aside .f { margin: 0; min-width: 0; }
   aside .f > span { display: block; color: #666; font-size: 12px; margin-bottom: 2px; }
   aside .f > label { display: block; font-size: 13px; }
   aside input[type=number] { width: 70px; }
-  aside select { width: 100%; }
+  aside select { min-width: 130px; }
   section { background: #fff; border-radius: 6px; padding: 8px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
@@ -37,7 +38,7 @@
   .src { font-size: 12px; padding: 0 6px; border-radius: 3px; background: #ddd; }
   .muted { color: #999; }
   .chipbox { border: 1px solid #ccc; border-radius: 6px; padding: 2px 4px; display: flex;
-    flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; align-items: center; cursor: text; background: #fff; }
+    flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; min-width: 180px; align-items: center; cursor: text; background: #fff; }
   .chip { background: #e0e7ff; border-radius: 10px; padding: 1px 6px; font-size: 12px;
     display: inline-flex; align-items: center; gap: 4px; }
   .chip b { cursor: pointer; color: #888; font-weight: normal; }
@@ -51,10 +52,6 @@
 </head>
 <body>
 <header id="top">
-  <span>通勤方式（用于筛选/排序）
-    <label><input type="radio" name="mode" value="drive_min" checked>驾车</label>
-    <label><input type="radio" name="mode" value="transit_min">公交</label>
-  </span>
   <label>排序
     <select id="sortBy">
       <option value="start_time">开始时间</option>
@@ -80,31 +77,41 @@
 </div>
 <main>
   <aside id="form">
-    <div class="f"><span>日期</span><select id="date">
-      <option value="">不限</option><option value="0">今天</option>
-      <option value="1">明天</option><option value="2">后天</option></select></div>
-    <div class="f"><span>开始时间</span><select id="timeBucket">
-      <option value="">不限</option><option value="360,600">早上 6–10 点</option>
-      <option value="600,840">上午 10–下午 2 点</option><option value="840,1080">下午 2–6 点</option>
-      <option value="1080,1320">晚上 6–10 点</option></select></div>
-    <div class="f"><span>时长</span><select id="dur">
-      <option value="">不限</option><option value="60,120">1小时</option>
-      <option value="120,180">2小时</option><option value="180,240">3小时</option>
-      <option value="240,">4小时及以上</option></select></div>
-    <div class="f"><span>家通勤上限（分钟，按当前方式）</span><input type="number" id="homeCommuteMax" min="0"></div>
-    <div class="f"><span>公司通勤上限（分钟，按当前方式）</span><input type="number" id="companyCommuteMax" min="0"></div>
-    <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
-    <div class="f"><span>已报名范围（上下限可相同=精确）</span><input type="number" id="apMin" min="0"> ~ <input type="number" id="apMax" min="0"></div>
-    <div class="f"><span>总人数范围（上下限可相同=精确）</span><input type="number" id="toMin" min="0"> ~ <input type="number" id="toMax" min="0"></div>
-    <div class="f"><span>其他</span>
-      <label><input type="checkbox" id="onlyOpen">只看还有空位</label>
-      <label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
-    <div class="f"><span>场馆只看</span><div class="chipbox" id="venueInc"></div></div>
-    <div class="f"><span>场馆不看</span><div class="chipbox" id="venueExc"></div></div>
-    <div class="f"><span>俱乐部只看</span><div class="chipbox" id="clubInc"></div></div>
-    <div class="f"><span>俱乐部不看</span><div class="chipbox" id="clubExc"></div></div>
-    <div class="f"><span>关键字只找</span><div class="chipbox" id="kwInc"></div></div>
-    <div class="f"><span>关键字排除</span><div class="chipbox" id="kwExc"></div></div>
+    <div class="grp">
+      <div class="f"><span>日期</span><select id="date">
+        <option value="">不限</option><option value="0">今天</option>
+        <option value="1">明天</option><option value="2">后天</option></select></div>
+      <div class="f"><span>开始时间</span><select id="timeBucket">
+        <option value="">不限</option><option value="360,600">早上 6–10 点</option>
+        <option value="600,840">上午 10–下午 2 点</option><option value="840,1080">下午 2–6 点</option>
+        <option value="1080,1320">晚上 6–10 点</option></select></div>
+      <div class="f"><span>时长</span><select id="dur">
+        <option value="">不限</option><option value="60,120">1小时</option>
+        <option value="120,180">2小时</option><option value="180,240">3小时</option>
+        <option value="240,">4小时及以上</option></select></div>
+      <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
+    </div>
+    <div class="grp">
+      <div class="f"><span>通勤方式</span>
+        <label><input type="radio" name="mode" value="drive_min" checked>驾车</label>
+        <label><input type="radio" name="mode" value="transit_min">公交</label></div>
+      <div class="f"><span>家通勤上限（分钟）</span><input type="number" id="homeCommuteMax" min="0"></div>
+      <div class="f"><span>公司通勤上限（分钟）</span><input type="number" id="companyCommuteMax" min="0"></div>
+      <div class="f"><label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
+    </div>
+    <div class="grp">
+      <div class="f"><span>已报名范围（上下限可相同=精确）</span><input type="number" id="apMin" min="0"> ~ <input type="number" id="apMax" min="0"></div>
+      <div class="f"><span>总人数范围（上下限可相同=精确）</span><input type="number" id="toMin" min="0"> ~ <input type="number" id="toMax" min="0"></div>
+      <div class="f"><label><input type="checkbox" id="onlyOpen">只看还有空位</label></div>
+    </div>
+    <div class="grp">
+      <div class="f"><span>场馆只看</span><div class="chipbox" id="venueInc"></div></div>
+      <div class="f"><span>场馆不看</span><div class="chipbox" id="venueExc"></div></div>
+      <div class="f"><span>俱乐部只看</span><div class="chipbox" id="clubInc"></div></div>
+      <div class="f"><span>俱乐部不看</span><div class="chipbox" id="clubExc"></div></div>
+      <div class="f"><span>关键字只找</span><div class="chipbox" id="kwInc"></div></div>
+      <div class="f"><span>关键字排除</span><div class="chipbox" id="kwExc"></div></div>
+    </div>
   </aside>
   <section>
     <div id="count" class="muted"></div>
