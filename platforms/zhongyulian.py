@@ -52,3 +52,49 @@ def parse_games(resp_text, day, today):
             "club_name": it.get("club_name"), "detail_ref": sid,
         })
     return out
+
+
+# ---- 网络抓取（手测）----
+import urllib.request
+
+_URL = "https://service2.zhongyulian.com/wxapi.php"
+_PAGE = 10
+_MAX_PAGES = 50  # 翻页上限，防服务端异常时死循环
+
+def _post(creds, day, skip):
+    body = {"day": day, "latitude": "31.2304", "longitude": "121.4737", "city": "上海",
+            "keyword": "", "limit": _PAGE, "order": 1, "skip": skip, "opt": 100,
+            "cmd": "indexList", "skey": creds["skey"],
+            "timestamp": 0, "sign": "0" * 32}  # sign/timestamp 服务端不校验
+    req = urllib.request.Request(_URL, json.dumps(body).encode(),
+                                 headers=creds.get("headers") or {}, method="POST")
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode()
+
+def fetch(creds, day):
+    """返回合并后的响应文本：my 列表取首页（一次全返回），other 列表按 skip 翻完。
+    首页不是 ok==1（鉴权失败/Fatal error HTML）时原样返回，交调用方判断。"""
+    first = _post(creds, day, 0)
+    try:
+        data = json.loads(first)
+    except ValueError:
+        return first
+    if not isinstance(data, dict) or data.get("ok") != 1:
+        return first
+    lst = data.setdefault("list", {})
+    other = list(lst.get("other_club_movement_list") or [])
+    got = len(other)
+    for i in range(1, _MAX_PAGES):
+        if got < _PAGE * i:  # 上一页不满，已到末页
+            break
+        try:
+            d = json.loads(_post(creds, day, _PAGE * i))
+            page = ((d.get("list") or {}).get("other_club_movement_list") or [])
+        except (ValueError, AttributeError):
+            break
+        if not page:
+            break
+        other += page
+        got += len(page)
+    lst["other_club_movement_list"] = other
+    return json.dumps(data, ensure_ascii=False)

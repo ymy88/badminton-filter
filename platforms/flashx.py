@@ -43,3 +43,22 @@ def parse_games(resp_text):
             "detail_ref": str(d.get("id")),
         })
     return out
+
+
+# ---- 网络抓取（手测）----
+import urllib.parse, urllib.request
+
+_URL = "https://flash.flashxsport.com/flash/activity/list"
+
+def fetch(creds, date_str, page):
+    """取某天第 page 页（pageNo 从 1 起）；返回响应文本。HTTP 错误（如 401）向上抛 HTTPError。"""
+    q = urllib.parse.urlencode({
+        "pageNo": page, "pageSize": 10, "sortRule": 0,
+        "latitude": "31.2304", "longitude": "121.4737", "city": "上海市",
+        "area": "", "nearby": "", "date": date_str,
+        "startTimeHour": "", "endTimeHour": "",
+        "levelLower": 1, "levelUpper": 9, "sportId": 1, "isQueryFreePlayAct": 0})
+    headers = {**(creds.get("headers") or {}), "x-access-token": creds["token"]}
+    with urllib.request.urlopen(urllib.request.Request(f"{_URL}?{q}", headers=headers),
+                                timeout=20) as r:
+        return r.read().decode()
