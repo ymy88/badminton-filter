@@ -1,0 +1,28 @@
+import commute
+
+def test_amap_coord_order():
+    # 高德要 lng,lat
+    assert commute.amap_coord(31.17, 121.44) == "121.44,31.17"
+
+def test_place_key():
+    assert commute.place_key(5, "flashx:1") == "c:5"
+    assert commute.place_key(None, "flashx:1") == "v:flashx:1"
+
+def test_sec_to_min():
+    assert commute.sec_to_min("1800") == 30
+    assert commute.sec_to_min(None) is None
+    assert commute.sec_to_min("") is None
+
+# Review Focus: 路径规划失败不抛、置 None（用假 fetcher 注入）
+def test_route_minutes_failure(monkeypatch):
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: None)
+    r = commute.route_minutes("121,31", "121.5,31.2")
+    assert r == {"drive_min": None, "transit_min": None}
+
+def test_route_minutes_parses(monkeypatch):
+    def fake(url, params):
+        if "driving" in url:
+            return {"status": "1", "route": {"paths": [{"duration": "1200"}]}}
+        return {"status": "1", "route": {"transits": [{"duration": "1800"}]}}
+    monkeypatch.setattr(commute, "_amap_get", fake)
+    assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": 20, "transit_min": 30}
