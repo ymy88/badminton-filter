@@ -31,12 +31,13 @@ function applyFilters(games, criteria) {
       if (d == null || d < c.durRange[0] || d >= c.durRange[1]) return false;
     }
 
-    if (c.origin && c.mode && c.commuteMax != null) {
-      const v = g.commute?.[c.origin]?.[c.mode];
-      if (v == null) {
-        if (!c.includeUnknownCommute) return false;
-      } else if (v > c.commuteMax) {
-        return false;
+    // 通勤上限：家/公司各自一个，均按当前方式 c.mode（驾车/公交）比较
+    if (c.mode) {
+      for (const [o, max] of [["home", c.homeCommuteMax], ["company", c.companyCommuteMax]]) {
+        if (max == null) continue;
+        const v = g.commute?.[o]?.[c.mode];
+        if (v == null) { if (!c.includeUnknownCommute) return false; }
+        else if (v > max) return false;
       }
     }
 
@@ -64,9 +65,10 @@ function applyFilters(games, criteria) {
 
 // 排序取值表：by → 取数值的函数（全为数值，null/缺失统一排最后）
 // 对应设计文档排序键：开始时间/通勤/价格/剩余空位(总−已报)/已报名
-function sortKey(by, origin, mode) {
+function sortKey(by, mode) {
   switch (by) {
-    case "commute": return (g) => g.commute?.[origin]?.[mode];
+    case "commute_home": return (g) => g.commute?.home?.[mode];
+    case "commute_company": return (g) => g.commute?.company?.[mode];
     case "start_time": return (g) => startMinutes(g.start_time);
     case "price": return (g) => g.price;
     case "open": return (g) =>
@@ -78,9 +80,9 @@ function sortKey(by, origin, mode) {
 }
 
 // 按 by 升序；缺失值排最后。返回新数组，不改入参；未知 by 原样返回副本
-function sortGames(games, by, origin, mode) {
+function sortGames(games, by, mode) {
   const out = games.slice();
-  const key = sortKey(by, origin, mode);
+  const key = sortKey(by, mode);
   if (!key) return out;
   const isNull = (v) => v == null || v === "" || Number.isNaN(v);
   out.sort((a, b) => {

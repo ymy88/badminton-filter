@@ -30,14 +30,18 @@ assert.equal(applyFilters([g({ club_name: "辉腾羽球" }), g({ club_name: "翎
 assert.equal(applyFilters([g({ club_name: "辉腾羽球" }), g({ club_name: "翎动" })],
   { clubExclude: ["辉腾"] }).length, 1);
 
-// 通勤上限（当前出发地+方式）
-assert.equal(applyFilters([g()], { origin: "home", mode: "drive_min", commuteMax: 10 }).length, 0);
-assert.equal(applyFilters([g()], { origin: "home", mode: "drive_min", commuteMax: 30 }).length, 1);
+// 通勤上限：家/公司各自一个，按当前方式（家驾20、公司驾50）
+assert.equal(applyFilters([g()], { mode: "drive_min", homeCommuteMax: 10 }).length, 0);
+assert.equal(applyFilters([g()], { mode: "drive_min", homeCommuteMax: 30 }).length, 1);
+assert.equal(applyFilters([g()], { mode: "drive_min", companyCommuteMax: 40 }).length, 0);
+assert.equal(applyFilters([g()], { mode: "drive_min", companyCommuteMax: 60 }).length, 1);
+// 家、公司可同时设，都要满足
+assert.equal(applyFilters([g()], { mode: "drive_min", homeCommuteMax: 30, companyCommuteMax: 40 }).length, 0);
 
-// 通勤未知保留/隐藏
+// 通勤未知保留/隐藏（按家）
 const unk = g({ commute: { home: { drive_min: null, transit_min: null }, company: {} } });
-assert.equal(applyFilters([unk], { origin: "home", mode: "drive_min", commuteMax: 30, includeUnknownCommute: true }).length, 1);
-assert.equal(applyFilters([unk], { origin: "home", mode: "drive_min", commuteMax: 30, includeUnknownCommute: false }).length, 0);
+assert.equal(applyFilters([unk], { mode: "drive_min", homeCommuteMax: 30, includeUnknownCommute: true }).length, 1);
+assert.equal(applyFilters([unk], { mode: "drive_min", homeCommuteMax: 30, includeUnknownCommute: false }).length, 0);
 
 // 时长分档：未知时长（跨午夜 null）设了档即剔除；没设档不受影响
 const durNull = g({ duration_min: null });
@@ -54,10 +58,14 @@ assert.equal(applyFilters([g({ duration_min: 300 })], { durRange: [240, Infinity
 assert.equal(applyFilters([g({ applied_num: 12, total_num: 12 }), g({ applied_num: 6, total_num: 12 })],
   { onlyOpen: true }).length, 1);
 
-// 排序：通勤升序
+// 排序：家通勤升序（按驾车）
 const s = sortGames([g({ source_id: "a" }), g({ source_id: "b", commute: { home: { drive_min: 5 } } })],
-  "commute", "home", "drive_min");
+  "commute_home", "drive_min");
 assert.equal(s[0].source_id, "b");
+// 排序：公司通勤升序（a 公司驾50，b 公司驾10）
+const sco = sortGames([g({ source_id: "a" }), g({ source_id: "b", commute: { company: { drive_min: 10 } } })],
+  "commute_company", "drive_min");
+assert.equal(sco[0].source_id, "b");
 
 // 排序：开始时间升序
 assert.equal(sortGames([g({ source_id: "a", start_time: "20:00" }), g({ source_id: "b", start_time: "08:00" })],
