@@ -87,7 +87,7 @@
     <div id="count" class="muted"></div>
     <table>
       <thead><tr>
-        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆</th>
+        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆</th><th>俱乐部</th>
         <th class="s" data-sort="commute">通勤</th><th class="s" data-sort="price">价格</th>
         <th class="s" data-sort="applied">报名</th><th>来源</th><th>标签</th>
       </tr></thead>
@@ -144,6 +144,7 @@ function parseTags(t) {
 }
 
 const fmtWalk = (m) => m == null ? "未知" : (m < 1000 ? m + "m" : (m / 1000).toFixed(1) + "km");
+const fmtDur = (m) => m == null ? "—" : (Number.isInteger(m / 60) ? m / 60 : (m / 60).toFixed(1)) + "小时";
 const fmtCommute = (c) => {
   if (!c) return "未知";
   const d = c.drive_min, t = c.transit_min;
@@ -154,11 +155,11 @@ function rowHtml(g, origin) {
   const venue = esc(g.venue_name || "") + (g.canonical_name ? `<br><span class="muted">${esc(g.canonical_name)}</span>` : "");
   const tags = parseTags(g.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
   return `<tr class="row"><td>${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
-    <td>${g.duration_min == null ? "—" : g.duration_min + "分"}</td><td>${venue}</td>
+    <td>${fmtDur(g.duration_min)}</td><td>${venue}</td><td>${esc(g.club_name || "—")}</td>
     <td>${fmtCommute(g.commute?.[origin])}</td><td>${g.price == null ? "—" : esc(g.price)}</td>
     <td>${esc(g.applied_num)}/${esc(g.total_num)}</td>
     <td><span class="src">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
-    <tr class="detail" style="display:none"><td colspan="8">${esc(g.raw_text || "（无原文）")}
+    <tr class="detail" style="display:none"><td colspan="9">${esc(g.raw_text || "（无原文）")}
 组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
 来源：${esc(SRC[g.source] || g.source)}　id：${esc(g.detail_ref || g.source_id || "—")}（供回原小程序手动查）</td></tr>`;
 }
