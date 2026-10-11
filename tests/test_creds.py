@@ -22,3 +22,21 @@ def test_save_sets_600(tmp_path, monkeypatch):
     creds.save({"a": 1})
     assert oct(p.stat().st_mode)[-3:] == "600"
     assert creds.load() == {"a": 1}
+
+def test_load_missing_bad_nondict(tmp_path, monkeypatch):
+    p = tmp_path / "creds.json"; monkeypatch.setattr(creds, "PATH", str(p))
+    assert creds.load() == {}
+    p.write_text("{bad"); assert creds.load() == {}
+    p.write_text("[]"); assert creds.load() == {}
+
+def test_save_tightens_existing_wide_file(tmp_path, monkeypatch):
+    import os
+    p = tmp_path / "creds.json"; p.write_text("{}"); os.chmod(p, 0o644)
+    monkeypatch.setattr(creds, "PATH", str(p))
+    creds.save({"a": 1})
+    assert oct(p.stat().st_mode)[-3:] == "600"
+
+def test_non_dict_json_not_failure():
+    for src in ("zhongyulian", "flashx"):
+        assert not creds.is_auth_failure(src, "[]", 200)
+        assert not creds.is_auth_failure(src, "null", 200)

@@ -6,14 +6,17 @@ PATH = "creds.json"
 def load():
     try:
         with open(PATH) as f:
-            return json.load(f)
+            d = json.load(f)
     except (FileNotFoundError, ValueError):
         return {}
+    return d if isinstance(d, dict) else {}
 
 def save(data):
-    with open(PATH, "w") as f:
+    # 原子创建 0600，避免先按 umask 建出宽权限文件的窗口
+    fd = os.open(PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
-    os.chmod(PATH, 0o600)
+    os.chmod(PATH, 0o600)  # 兜底：旧文件可能是宽权限
 
 def is_auth_failure(source, resp_text, status_code):
     if source == "flashx" and status_code == 401:
@@ -43,7 +46,8 @@ def _merge(source, entry):
     except (FileNotFoundError, ValueError):
         data = {}
     data[source] = entry
-    with open(PATH, "w") as f:
+    fd = os.open(PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
     os.chmod(PATH, 0o600)
 
@@ -65,32 +69,44 @@ def request(flow):
 
 def capture(timeout=90):
     """拉起 mitmdump 抓微信小程序流量，两平台凭证都到手（或超时）即停。需手测：
-    运行后在微信里分别打开中羽联、闪动小程序并刷新列表。"""
+    运行后在微信里分别打开中羽联、闪动小程序并刷新列表。
+    返回 load() 的结果；没抓到的平台沿用旧值（若有），调用方需自行检查两个平台的 key 是否都在。"""
     if not shutil.which("mitmdump"):
         raise RuntimeError("未找到 mitmdump，请先安装：brew install mitmproxy（或 uv tool install mitmproxy）")
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
-        f.write(_ADDON)
-    # 抓取前清掉旧凭证，才能分辨"新抓到"
+    platforms = ("zhongyulian", "flashx")
     old = load()
-    save({k: v for k, v in old.items() if k not in ("zhongyulian", "flashx")})
-    p = subprocess.Popen(
-        ["mitmdump", "--mode", "local:WeChat", "-s", f.name, "-q"],
-        env={**os.environ, "CREDS_PATH": os.path.abspath(PATH)},
-    )
+    backup = {k: old[k] for k in platforms if k in old}
+    # 抓取前清掉旧凭证，才能分辨"新抓到"；结束后对没抓到的回填旧值
+    save({k: v for k, v in old.items() if k not in platforms})
+    addon = None
+    p = None
     try:
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            addon = f.name
+            f.write(_ADDON)
+        p = subprocess.Popen(
+            ["mitmdump", "--mode", "local:WeChat", "-s", addon, "-q"],
+            env={**os.environ, "CREDS_PATH": os.path.abspath(PATH)},
+        )
         end = time.time() + timeout
         while time.time() < end:
             d = load()
-            if "zhongyulian" in d and "flashx" in d:
+            if all(k in d for k in platforms):
                 break
             if p.poll() is not None:
                 break
             time.sleep(1)
     finally:
-        p.terminate()
-        try:
-            p.wait(5)
-        except subprocess.TimeoutExpired:
-            p.kill()
-        os.unlink(f.name)
-    return load()
+        if p:
+            p.terminate()
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        if addon:
+            os.unlink(addon)
+        d = load()
+        for k, v in backup.items():
+            d.setdefault(k, v)
+        save(d)
+    return d
