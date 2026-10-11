@@ -189,6 +189,11 @@ async function init() {
   $("venues").innerHTML = (cfg.canonical_names || []).map((n) => `<option value="${esc(n)}">`).join("");
   applyOrigins(org);
   await loadGames();
+  // 若后台通勤还在算（例如刚点完刷新又刷新了网页），恢复进度显示并禁用刷新按钮
+  try {
+    const s = await api("/api/refresh/status");
+    if (s.computing) { $("refreshBtn").disabled = true; pollCommute(); }
+  } catch (e) { /* 状态查不到不影响主流程 */ }
 }
 
 // 筛选控件、出发地、方式、排序：改动即重渲染
@@ -229,6 +234,7 @@ let _pollTimer = null;
 // 通勤在后台算：每 5s 查进度，有新结果就重渲染列表；算完停
 function pollCommute(baseMsg) {
   if (_pollTimer) clearTimeout(_pollTimer);
+  const pre = baseMsg ? baseMsg + "　" : "";
   let last = -1;
   const tick = async () => {
     let s;
@@ -236,13 +242,13 @@ function pollCommute(baseMsg) {
     catch { _pollTimer = setTimeout(tick, 5000); return; }
     if (s.commute_places !== last) { last = s.commute_places; await loadGames(); }
     if (s.computing) {
-      $("status").textContent = `${baseMsg}　通勤后台计算中…（已算 ${s.commute_places}）`;
+      $("status").textContent = `${pre}通勤后台计算中…（已算 ${s.commute_places}）`;
       _pollTimer = setTimeout(tick, 5000);
     } else {
       await loadGames();
       $("status").textContent = (s.pending > 0)
-        ? `${baseMsg}　还有 ${s.pending} 个场馆通勤没算出（可能高德繁忙），稍后点刷新重试`
-        : `${baseMsg}　通勤已算完（${s.commute_places}）`;
+        ? `${pre}还有 ${s.pending} 个场馆通勤没算出（可能高德繁忙），稍后点刷新重试`
+        : `${pre}通勤已算完（${s.commute_places}）`;
       $("refreshBtn").disabled = false;  // 通勤算完才放开刷新
     }
   };

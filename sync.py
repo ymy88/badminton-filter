@@ -213,15 +213,19 @@ def pending_count(conn):
     # 还需补数据的场馆数：无坐标(POI/geocode 失败) + 有坐标但缺某出发地通勤
     # 高德失败不缓存，故这些会在下次刷新/改地址时自动重试；此数用于提示用户重试
     origins = [r["key"] for r in conn.execute("SELECT key FROM origins WHERE lat IS NOT NULL")]
-    pending = set()
-    for r in conn.execute("SELECT canonical_id, venue_key, lat FROM games"):
+    if not origins:
+        return 0
+    pending, places = set(), set()  # 先按场馆去重，避免对每条球局都查一次
+    for r in conn.execute("SELECT DISTINCT canonical_id, venue_key, lat FROM games"):
         if r["lat"] is None:
-            pending.add(("v", r["venue_key"])); continue
-        pk = commute.place_key(r["canonical_id"], r["venue_key"])
+            pending.add(("v", r["venue_key"]))
+        else:
+            places.add(commute.place_key(r["canonical_id"], r["venue_key"]))
+    for pk in places:
         # 三项齐全的出发地才算"完成"（部分缺失会重算）
         complete = conn.execute(
             "SELECT COUNT(*) c FROM commute WHERE place_key=? AND drive_min IS NOT NULL"
             " AND transit_min IS NOT NULL AND walk_m IS NOT NULL", (pk,)).fetchone()["c"]
-        if origins and complete < len(origins):
+        if complete < len(origins):
             pending.add(("pk", pk))
     return len(pending)
