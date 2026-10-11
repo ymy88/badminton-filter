@@ -1,6 +1,6 @@
 # 凭证与数据（含登录态，绝不入库）
 creds.json
-# config.json 含真实家/公司地址，隐私（git 不支持行内注释，注释须单独成行）
+# config.json 本地可选配置（端口/手动球馆覆盖），不入库
 config.json
 games.db
 *.mitm
