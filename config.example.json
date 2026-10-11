@@ -1,0 +1,9 @@
+{
+  "port": 8765,
+  "canonical_venues": [
+    {"canonical_name": "徐家汇体育公园(万体汇)",
+     "name_patterns": ["徐家汇体育公园", "万体汇", "徐汇体育公园综合馆"],
+     "platform_ids": []}
+  ],
+  "keywords": {"include": [], "exclude": []}
+}
