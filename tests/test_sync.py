@@ -2,7 +2,7 @@ import json
 import db, sync
 
 def _g(**kw):
-    base = dict(source="flashx", source_id="1", title="t", date="2026-10-11",
+    base = dict(source="flashx", source_id="1", title="t", date="2999-01-01",  # 远期，避开 upsert 清理过期
                 start_time="19:00", end_time="21:00", duration_min=120,
                 venue_name="馆", venue_key="flashx:1", canonical_id=None,
                 price=30.0, applied_num=0, total_num=12, lat=31.1, lng=121.5,

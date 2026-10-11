@@ -28,6 +28,28 @@ def test_refresh_status_shape():
     r = appmod.create_app(conn, {}).test_client().get("/api/refresh/status").get_json()
     assert r["computing"] is False and r["commute_places"] == 0
 
+def test_refresh_compute_single_flight_and_rerun(monkeypatch, tmp_path):
+    # 连点刷新：后台通勤不并发（单飞），但期间的触发不丢（跑完补一轮）
+    import threading, time, sync
+    def _wait(cond, t=2.0):
+        end = time.time() + t
+        while time.time() < end:
+            if cond(): return True
+            time.sleep(0.01)
+        return False
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    monkeypatch.setattr(sync, "refresh", lambda *a: {"ok": True, "count": 0, "auth_failed": [], "errors": []})
+    calls, gate = [], threading.Event()
+    monkeypatch.setattr(sync, "compute_pending", lambda p, c: (calls.append(1), gate.wait(2)))
+    client = appmod.create_app(conn, {}, db_path=str(tmp_path / "x.db")).test_client()
+    client.post("/api/refresh")                 # 起第一轮，卡在 gate
+    assert _wait(lambda: len(calls) == 1)
+    client.post("/api/refresh")                 # 第二次：占锁中 → 不并发，置 rerun
+    time.sleep(0.05)
+    assert len(calls) == 1                       # 没有并发起第二个
+    gate.set()                                   # 放行 → 收尾时因 rerun 再补一轮
+    assert _wait(lambda: len(calls) == 2)
+
 def test_keywords_save_and_load_roundtrip():
     # 关键字存库：保存→读回，空串被剔除
     conn = db.connect(":memory:"); db.init_schema(conn)

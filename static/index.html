@@ -239,12 +239,14 @@ function pollCommute(baseMsg) {
     } else {
       await loadGames();
       $("status").textContent = `${baseMsg}　通勤已算完（${s.commute_places}）`;
+      $("refreshBtn").disabled = false;  // 通勤算完才放开刷新
     }
   };
   tick();
 }
 
 $("refreshBtn").onclick = async () => {
+  $("refreshBtn").disabled = true;  // 防连点：刷新+后台通勤整个过程禁用
   $("status").textContent = "刷新中…";
   $("status").className = "";
   try {
@@ -257,8 +259,9 @@ $("refreshBtn").onclick = async () => {
     if ((r.errors || []).length) msg += `；网络失败：${r.errors.map((e) => typeof e === "string" ? e : JSON.stringify(e)).join("；")}`;
     $("status").textContent = msg;
     await loadGames();          // 球局立刻显示（通勤可能还是「未知」）
-    if (r.computing) pollCommute(msg);  // 通勤后台边算边刷
-  } catch (e) { $("status").textContent = "刷新失败：" + e; }
+    if (r.computing) pollCommute(msg);  // 通勤后台边算边刷，算完由 pollCommute 放开按钮
+    else $("refreshBtn").disabled = false;
+  } catch (e) { $("status").textContent = "刷新失败：" + e; $("refreshBtn").disabled = false; }
 };
 
 $("capBtn").onclick = async () => {

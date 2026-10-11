@@ -7,7 +7,8 @@ ORIGINS = ("home", "company")
 
 def create_app(conn, config, db_path=None):
     app = Flask(__name__, static_folder=None)
-    compute_lock = threading.Lock()  # 保证同时只有一个后台通勤任务
+    compute_lock = threading.Lock()   # 保证同时只有一个后台通勤任务
+    compute_rerun = threading.Event()  # 运行期间又被触发 → 跑完再补一轮
 
     @app.get("/")
     def index():
@@ -89,14 +90,24 @@ def create_app(conn, config, db_path=None):
         return jsonify(res)
 
     def _start_compute():
-        # 后台算通勤，不阻塞请求；同时只跑一个
-        if not db_path or not compute_lock.acquire(blocking=False):
+        # 后台算通勤，不阻塞请求。单飞：同时只跑一个线程；
+        # 若运行期间又被触发（连点刷新/改地址），置 rerun，跑完自动再补一轮，不丢新活也不并发。
+        if not db_path:
             return False
+        if not compute_lock.acquire(blocking=False):
+            compute_rerun.set()  # 已在跑 → 标记跑完再来一轮
+            return True
         def bg():
             try:
-                sync.compute_pending(db_path, config)
+                while True:
+                    compute_rerun.clear()
+                    sync.compute_pending(db_path, config)
+                    if not compute_rerun.is_set():
+                        break  # 期间无新触发才收工
             finally:
                 compute_lock.release()
+            if compute_rerun.is_set():  # 补查：防丢「判断与释放之间」卡进来的触发
+                _start_compute()
         threading.Thread(target=bg, daemon=True).start()
         return True
 
