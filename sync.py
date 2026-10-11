@@ -15,8 +15,38 @@ def upsert_games(conn, games):
     conn.execute("DELETE FROM games WHERE date < ?", (date.today().isoformat(),))
     conn.commit()
 
+def auto_canonical(conn, game, canonical_list):
+    # 未匹配任何已有规范馆 → 高德 POI 搜索，用搜出的名字自动建/复用规范馆
+    # 跨平台去重：两平台不同叫法若搜到同一 POI(amap_id) 则归并到同一规范馆
+    poi = commute.poi_search(game["venue_name"] or "")
+    if not poi:
+        return None
+    name = game["venue_name"] or ""
+    row = conn.execute("SELECT * FROM canonical_venues WHERE amap_id=?", (poi["amap_id"],)).fetchone()
+    if row:  # 同一 POI 的另一种叫法 → 复用，并记进 name_patterns 省得下次再搜
+        pats = json.loads(row["name_patterns"] or "[]")
+        if name and name not in pats:
+            pats.append(name)
+            conn.execute("UPDATE canonical_venues SET name_patterns=? WHERE id=?",
+                         (json.dumps(pats, ensure_ascii=False), row["id"]))
+        c = {"id": row["id"], "canonical_name": row["canonical_name"], "lat": row["lat"],
+             "lng": row["lng"], "name_patterns": pats,
+             "platform_ids": json.loads(row["platform_ids"] or "[]"), "amap_id": row["amap_id"]}
+    else:  # 新馆：高德结果名即统一球场名
+        cur = conn.execute(
+            "INSERT INTO canonical_venues(canonical_name,lat,lng,name_patterns,platform_ids,amap_id)"
+            " VALUES(?,?,?,?,?,?)",
+            (poi["name"], poi["lat"], poi["lng"], json.dumps([name], ensure_ascii=False), "[]", poi["amap_id"]))
+        c = {"id": cur.lastrowid, "canonical_name": poi["name"], "lat": poi["lat"], "lng": poi["lng"],
+             "name_patterns": [name], "platform_ids": [], "amap_id": poi["amap_id"]}
+    conn.commit()
+    canonical_list.append(c)  # 同批后续球局可经 classify 命中，无需再搜
+    return c
+
 def enrich_venue(conn, game, canonical_list, origins_ll):
     c = venues.classify(game["venue_name"], game["venue_key"], canonical_list)
+    if c is None:  # 没匹配上 → 自动按高德 POI 建规范馆（去人工维护 config）
+        c = auto_canonical(conn, game, canonical_list)
     if c:
         game["canonical_id"] = c["id"]
         if c["lat"] is not None:  # 规范馆有坐标才覆盖；否则保留球局自带坐标（闪动带经纬度）
@@ -104,9 +134,9 @@ def load_canonical_list(conn):
     return [{"id": r["id"], "canonical_name": r["canonical_name"],
              "lat": r["lat"], "lng": r["lng"],
              "name_patterns": json.loads(r["name_patterns"] or "[]"),
-             "platform_ids": json.loads(r["platform_ids"] or "[]")}
+             "platform_ids": json.loads(r["platform_ids"] or "[]"), "amap_id": r["amap_id"]}
             for r in conn.execute("SELECT id, canonical_name, lat, lng, name_patterns,"
-                                  " platform_ids FROM canonical_venues")]
+                                  " platform_ids, amap_id FROM canonical_venues")]
 
 def refresh(conn, creds, config):
     today = date.today()

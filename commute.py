@@ -39,6 +39,19 @@ def geocode(address):
     except (ValueError, KeyError, IndexError, AttributeError, TypeError):
         return None
 
+def poi_search(name):
+    # 按名字搜高德 POI，取第一条：统一球场名 + 坐标 + POI id（跨平台去重键）
+    d = _amap_get(f"{BASE}/v3/place/text",
+                  {"keywords": name, "city": CITY, "citylimit": "true", "offset": 1})
+    if not d or not d.get("pois"):
+        return None
+    try:
+        p = d["pois"][0]
+        lng, lat = p["location"].split(",")
+        return {"amap_id": p["id"], "name": p["name"], "lat": float(lat), "lng": float(lng)}
+    except (ValueError, KeyError, IndexError, AttributeError, TypeError):
+        return None
+
 def _duration_min(resp, key):
     # 防御式取值：结构缺失或异常一律返回 None，不抛
     try:

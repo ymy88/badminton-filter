@@ -21,7 +21,7 @@ def init_schema(conn):
       UNIQUE(source, source_id));
     CREATE TABLE IF NOT EXISTS canonical_venues(
       id INTEGER PRIMARY KEY, canonical_name TEXT, lat REAL, lng REAL,
-      name_patterns TEXT, platform_ids TEXT);
+      name_patterns TEXT, platform_ids TEXT, amap_id TEXT);
     CREATE TABLE IF NOT EXISTS venues(
       venue_key TEXT PRIMARY KEY, name TEXT, lat REAL, lng REAL,
       address TEXT, geocoded_at TEXT);
@@ -31,4 +31,9 @@ def init_schema(conn):
     CREATE TABLE IF NOT EXISTS origins(
       key TEXT PRIMARY KEY, address TEXT, lat REAL, lng REAL);
     """)
+    # 旧库迁移：amap_id 为后加列，已存在则忽略
+    try:
+        conn.execute("ALTER TABLE canonical_venues ADD COLUMN amap_id TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()

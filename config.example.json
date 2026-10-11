@@ -1,9 +1,6 @@
 {
   "port": 8765,
-  "canonical_venues": [
-    {"canonical_name": "徐家汇体育公园(万体汇)",
-     "name_patterns": ["徐家汇体育公园", "万体汇", "徐汇体育公园综合馆"],
-     "platform_ids": []}
-  ],
+  "_canonical_venues说明": "现在无需手填：未匹配的新球馆会自动按高德POI搜索建统一球场名并跨平台归并。这里可选地预置/覆盖个别馆（name_patterns 命中即优先用本条，不走自动搜索）。",
+  "canonical_venues": [],
   "keywords": {"include": [], "exclude": []}
 }

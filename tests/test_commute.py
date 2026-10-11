@@ -41,3 +41,13 @@ def test_geocode_bad_location(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get",
                         lambda url, params: {"status": "1", "geocodes": [{"location": "bad"}]})
     assert commute.geocode("某地址") is None
+
+def test_poi_search_parses(monkeypatch):
+    # 取第一条 POI：名字 + id + 坐标(lng,lat → lat,lng)
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: {"status": "1",
+        "pois": [{"id": "B1", "name": "徐家汇体育公园", "location": "121.43,31.18"}]})
+    assert commute.poi_search("万体汇") == {"amap_id": "B1", "name": "徐家汇体育公园", "lat": 31.18, "lng": 121.43}
+
+def test_poi_search_empty(monkeypatch):
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: {"status": "1", "pois": []})
+    assert commute.poi_search("不存在") is None
