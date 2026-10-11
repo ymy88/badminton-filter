@@ -6,13 +6,14 @@
 
 **Architecture:** Flask 薄后端只做三件事——刷新入库、返回全量球局、凭证抓取；筛选和排序全在前端原生 JS。两平台接口各自封装，归一化成统一「球局」记录。场馆靠用户维护的规范表归类，通勤走高德并按规范馆缓存。
 
-**Tech Stack:** Python 3 / Flask / 标准库 sqlite3 / 原生 HTML+JS / pytest（纯逻辑）/ node（前端筛选自测）/ mitmdump（凭证抓取，手测）
+**Tech Stack:** Python 3（`uv` 管理环境）/ Flask / 标准库 sqlite3 / 原生 HTML+JS / pytest（纯逻辑）/ node（前端筛选自测）/ mitmdump（凭证抓取，手测）
 
 **Spec:** `docs/superpowers/specs/2026-10-11-badminton-filter-design.md`
 
 ## Global Constraints
 
 - 技术栈仅限：Flask + 标准库 `sqlite3` + 原生 HTML/JS。不引入 ORM、前端框架、构建工具。
+- Python 环境用 `uv` 管理：依赖写 `pyproject.toml`，锁定 `uv.lock`（入库），所有 Python 命令走 `uv run ...`。
 - 高德 key 只从环境变量 `GAO_DE_MAP_API_KEY` 读，不硬编码、不入库。
 - 高德坐标顺序一律 `经度,纬度`（lng,lat）。
 - 敏感文件进 `.gitignore`：`creds.json`（600 权限）、`games.db`、`*.mitm`。
@@ -35,7 +36,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `requirements.txt` | Flask 一个依赖 |
+| `pyproject.toml` / `uv.lock` | uv 项目与依赖（Flask；dev: pytest） |
 | `config.example.json` | 配置样例（出发地、规范场馆表、端口、关键词预设） |
 | `db.py` | SQLite 建表 + 读写助手 |
 | `platforms/zhongyulian.py` | 中羽联：请求 + 解析/归一化（纯函数 `parse_games`） |
@@ -56,10 +57,18 @@
 ## Task 1: 项目骨架 + SQLite 建表
 
 **Files:**
-- Create: `requirements.txt`, `config.example.json`, `db.py`, `tests/test_db.py`
+- Create: `pyproject.toml`, `uv.lock`, `config.example.json`, `db.py`, `tests/test_db.py`
 
 **Interfaces:**
 - Produces: `db.connect(path) -> sqlite3.Connection`；`db.init_schema(conn)` 建全部表；连接设 `row_factory = sqlite3.Row`。
+
+- [ ] **Step 0: 初始化 uv 项目**
+
+```bash
+uv init --bare --python 3.12   # 生成 pyproject.toml，不建示例代码
+uv add flask
+uv add --dev pytest
+```
 
 - [ ] **Step 1: 写失败测试**
 
@@ -88,7 +97,7 @@ def test_games_unique_source_id():
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `python -m pytest tests/test_db.py -v`
+Run: `uv run pytest tests/test_db.py -v`
 Expected: FAIL（`No module named 'db'`）
 
 - [ ] **Step 3: 写 db.py**
@@ -128,7 +137,7 @@ def init_schema(conn):
     conn.commit()
 ```
 
-同时写 `requirements.txt`（`flask`）和 `config.example.json`：
+同时写 `config.example.json`（依赖已由 Step 0 的 `uv add` 装好）：
 
 ```json
 {
@@ -145,13 +154,13 @@ def init_schema(conn):
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `python -m pytest tests/test_db.py -v` → PASS
+Run: `uv run pytest tests/test_db.py -v` → PASS
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add requirements.txt config.example.json db.py tests/test_db.py
-git commit -m "feat: SQLite 建表与连接助手"
+git add pyproject.toml uv.lock config.example.json db.py tests/test_db.py
+git commit -m "feat: uv 项目初始化 + SQLite 建表与连接助手"
 ```
 
 ---
@@ -222,7 +231,7 @@ def test_time_malformed():
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `python -m pytest tests/test_zhongyulian.py -v` → FAIL
+Run: `uv run pytest tests/test_zhongyulian.py -v` → FAIL
 
 - [ ] **Step 3: 写 platforms/zhongyulian.py 的 parse_games**
 
@@ -285,7 +294,7 @@ def parse_games(resp_text, day, today):
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `python -m pytest tests/test_zhongyulian.py -v` → PASS
+Run: `uv run pytest tests/test_zhongyulian.py -v` → PASS
 
 - [ ] **Step 5: 提交**
 
@@ -344,7 +353,7 @@ def test_non_json_or_fail_returns_empty():
     assert f.parse_games(json.dumps({"success": False})) == []
 ```
 
-- [ ] **Step 2: 运行确认失败** → `python -m pytest tests/test_flashx.py -v` → FAIL
+- [ ] **Step 2: 运行确认失败** → `uv run pytest tests/test_flashx.py -v` → FAIL
 
 - [ ] **Step 3: 写 platforms/flashx.py**
 
@@ -680,7 +689,7 @@ def enrich_venue(conn, game, canonical_list, origins_ll):
 
 `refresh` 串起：确保 origins 坐标（地理编码 config 地址、地址变则清 commute）→ 对两平台 fetch+parse（捕获鉴权失败）→ upsert → 逐条 enrich。鉴权失败平台计入 `auth_failed`，不中断另一平台。各平台 `fetch` 用 Task 7 的 creds 组装请求头（中羽联 POST JSON body 带 `skey`、`day`、`city:"上海"`、`cmd:"indexList"`、`limit/skip` 翻页 other 列表；闪动 GET 带 `x-access-token` 头、`date`/`pageNo` 翻页）。接口字段与请求头照 `RESEARCH.md`。
 
-- [ ] **Step 4: 运行确认通过** → `python -m pytest tests/test_sync.py -v` → PASS
+- [ ] **Step 4: 运行确认通过** → `uv run pytest tests/test_sync.py -v` → PASS
 
 - [ ] **Step 5: 提交**
 
@@ -937,7 +946,7 @@ git commit -m "feat: 前端筛选与排序纯函数（node 自测）"
 
 - [ ] **Step 5: 手动验证 + 提交**
 
-手测：`python app.py` → 浏览器自动打开 → 刷新拉到两平台球局 → 各筛选项逐个验证 → 切出发地通勤变化 → 点详情 → 制造凭证失效走一遍抓取。通过后：
+手测：`uv run app.py` → 浏览器自动打开 → 刷新拉到两平台球局 → 各筛选项逐个验证 → 切出发地通勤变化 → 点详情 → 制造凭证失效走一遍抓取。通过后：
 
 ```bash
 git add static/index.html
@@ -948,6 +957,6 @@ git commit -m "feat: 前端单页（筛选/排序/详情/刷新/凭证抓取）"
 
 ## 收尾
 
-- [ ] 全量 pytest + node 测试通过：`python -m pytest -q && node tests/filters.test.js`
+- [ ] 全量 pytest + node 测试通过：`uv run pytest -q && node tests/filters.test.js`
 - [ ] `.gitignore` 确认挡住 `creds.json`/`games.db`/`*.mitm`（Task 建仓时已加）
 - [ ] 复制 `config.example.json` → `config.json`，填真实出发地与规范场馆，端到端跑一次
