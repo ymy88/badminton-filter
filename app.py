@@ -5,8 +5,9 @@ import commute, creds, db, sync
 
 ORIGINS = ("home", "company")
 
-def create_app(conn, config):
+def create_app(conn, config, db_path=None):
     app = Flask(__name__, static_folder=None)
+    compute_lock = threading.Lock()  # 保证同时只有一个后台通勤任务
 
     @app.get("/")
     def index():
@@ -83,11 +84,32 @@ def create_app(conn, config):
             conn.execute("DELETE FROM commute WHERE origin=?", (o,))  # 坐标变了，缓存作废
             conn.commit()
             res[o] = {"ok": True, "changed": True}
+        if any(v.get("changed") for v in res.values()):
+            _start_compute()  # 地址变了，后台重算该出发地通勤
         return jsonify(res)
+
+    def _start_compute():
+        # 后台算通勤，不阻塞请求；同时只跑一个
+        if not db_path or not compute_lock.acquire(blocking=False):
+            return False
+        def bg():
+            try:
+                sync.compute_pending(db_path, config)
+            finally:
+                compute_lock.release()
+        threading.Thread(target=bg, daemon=True).start()
+        return True
 
     @app.post("/api/refresh")
     def refresh():
-        return jsonify(sync.refresh(conn, creds.load(), config))
+        res = sync.refresh(conn, creds.load(), config)
+        res["computing"] = _start_compute()  # 通勤在后台算
+        return jsonify(res)
+
+    @app.get("/api/refresh/status")
+    def refresh_status():
+        return jsonify({"computing": compute_lock.locked(),
+                        "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"]})
 
     @app.post("/api/creds/capture")
     def capture():
@@ -106,4 +128,5 @@ if __name__ == "__main__":
     db.init_schema(conn)
     port = cfg.get("port", 8765)
     threading.Timer(1, lambda: webbrowser.open(f"http://localhost:{port}")).start()
-    create_app(conn, cfg).run(port=port, threaded=False)  # sqlite 连接不跨线程
+    # 主连接只在 Flask 单线程里用（threaded=False）；后台算通勤的线程自开连接（WAL 并发）
+    create_app(conn, cfg, db_path="games.db").run(port=port, threaded=False)

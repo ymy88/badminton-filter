@@ -223,6 +223,27 @@ $("addrSave").onclick = async () => {
   } catch (e) { $("msgHome").className = "err"; $("msgHome").textContent = "保存失败：" + e; }
 };
 
+let _pollTimer = null;
+// 通勤在后台算：每 5s 查进度，有新结果就重渲染列表；算完停
+function pollCommute(baseMsg) {
+  if (_pollTimer) clearTimeout(_pollTimer);
+  let last = -1;
+  const tick = async () => {
+    let s;
+    try { s = await api("/api/refresh/status"); }
+    catch { _pollTimer = setTimeout(tick, 5000); return; }
+    if (s.commute_places !== last) { last = s.commute_places; await loadGames(); }
+    if (s.computing) {
+      $("status").textContent = `${baseMsg}　通勤后台计算中…（已算 ${s.commute_places}）`;
+      _pollTimer = setTimeout(tick, 5000);
+    } else {
+      await loadGames();
+      $("status").textContent = `${baseMsg}　通勤已算完（${s.commute_places}）`;
+    }
+  };
+  tick();
+}
+
 $("refreshBtn").onclick = async () => {
   $("status").textContent = "刷新中…";
   $("status").className = "";
@@ -235,7 +256,8 @@ $("refreshBtn").onclick = async () => {
     if (failed.length) msg = `凭证失效：${failed.map((p) => SRC[p] || p).join("、")}（点「抓取凭证」）`;
     if ((r.errors || []).length) msg += `；网络失败：${r.errors.map((e) => typeof e === "string" ? e : JSON.stringify(e)).join("；")}`;
     $("status").textContent = msg;
-    await loadGames();
+    await loadGames();          // 球局立刻显示（通勤可能还是「未知」）
+    if (r.computing) pollCommute(msg);  // 通勤后台边算边刷
   } catch (e) { $("status").textContent = "刷新失败：" + e; }
 };
 

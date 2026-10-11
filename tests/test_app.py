@@ -23,6 +23,11 @@ def test_filters_js_is_served():
     assert r.status_code == 200
     assert b"applyFilters" in r.data
 
+def test_refresh_status_shape():
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    r = appmod.create_app(conn, {}).test_client().get("/api/refresh/status").get_json()
+    assert r["computing"] is False and r["commute_places"] == 0
+
 def test_keywords_save_and_load_roundtrip():
     # 关键字存库：保存→读回，空串被剔除
     conn = db.connect(":memory:"); db.init_schema(conn)

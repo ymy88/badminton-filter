@@ -6,6 +6,8 @@ def connect(path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL")   # 允许后台算通勤的连接与主连接并发读写
+    conn.execute("PRAGMA busy_timeout=5000")  # 写锁冲突时等待而非立即报错
     return conn
 
 def init_schema(conn):

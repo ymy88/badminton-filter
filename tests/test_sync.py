@@ -115,6 +115,30 @@ def test_refresh_no_creds_reports_auth_failed():
     assert set(r["auth_failed"]) == {"zhongyulian", "flashx"}
     assert r["ok"] is False and r["count"] == 0
 
+def test_refresh_stores_games_without_computing_commute(monkeypatch):
+    # 刷新只入库、秒回，不在请求里算通勤（通勤交给 compute_pending 后台）
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    monkeypatch.setattr(sync, "_fetch_flashx", lambda cr, today: ([_g(source_id="1", lat=31.1, lng=121.5)], False))
+    monkeypatch.setattr(sync, "_fetch_zhongyulian", lambda cr, today: ([], False))
+    r = sync.refresh(conn, {"flashx": {"x": 1}, "zhongyulian": {"x": 1}}, {})
+    assert r["count"] == 1 and r["ok"] is True
+    assert conn.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 0
+
+def test_compute_pending_fills_commute(tmp_path, monkeypatch):
+    # 后台任务：自开连接给缺通勤的球局补算
+    p = str(tmp_path / "t.db")
+    conn = db.connect(p); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.2,121.4)")
+    conn.execute("INSERT INTO games(source,source_id,venue_name,venue_key,canonical_id,lat,lng,date)"
+                 " VALUES('flashx','1','馆','flashx:1',NULL,31.1,121.5,'2999-01-01')")
+    conn.commit(); conn.close()
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n: None)
+    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 18, "transit_min": 30})
+    sync.compute_pending(p, {})
+    conn = db.connect(p)
+    assert conn.execute("SELECT drive_min FROM commute").fetchone()["drive_min"] == 18
+
 def test_seed_canonical_idempotent():
     conn = db.connect(":memory:"); db.init_schema(conn)
     cfg = {"canonical_venues": [{"canonical_name": "A馆", "lat": 1.0, "lng": 2.0,

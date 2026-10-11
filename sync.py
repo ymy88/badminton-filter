@@ -1,7 +1,7 @@
 # sync.py —— 刷新编排：两平台抓取 → 归一化 → 入库 → 场馆归类 → 补坐标/通勤
 import json, urllib.error
 from datetime import date, timedelta
-import creds as creds_mod, venues, commute
+import db, creds as creds_mod, venues, commute
 from platforms import zhongyulian, flashx
 
 _COLS = ("source", "source_id", "title", "date", "start_time", "end_time", "duration_min",
@@ -66,18 +66,21 @@ def enrich_venue(conn, game, canonical_list, origins_ll):
     if game["lat"] is None:
         return  # 坐标仍缺，通勤跳过
     pk = commute.place_key(game.get("canonical_id"), game["venue_key"])
-    dest = commute.amap_coord(game["lat"], game["lng"])
+    _ensure_commute(conn, pk, commute.amap_coord(game["lat"], game["lng"]), origins_ll)
+
+def _ensure_commute(conn, pk, dest, origins_ll):
+    # 给场馆 pk 补各出发地通勤：已有缓存跳过；全失败不缓存（留待重试）
     for origin, oll in origins_ll.items():
         if conn.execute("SELECT 1 FROM commute WHERE origin=? AND place_key=?",
                         (origin, pk)).fetchone():
             continue
         m = commute.route_minutes(oll, dest)
         if m["drive_min"] is None and m["transit_min"] is None:
-            continue  # 完全失败不缓存，下次刷新重算
+            continue
         conn.execute("INSERT OR REPLACE INTO commute(origin,place_key,drive_min,transit_min,computed_at)"
                      " VALUES(?,?,?,?,datetime('now'))",
                      (origin, pk, m["drive_min"], m["transit_min"]))
-    conn.commit()
+        conn.commit()
 
 def _call(source, fn, *args):
     """执行 fetch；返回 (文本, 是否鉴权失败)。HTTP 错误取状态码+响应体判断。"""
@@ -139,12 +142,9 @@ def load_canonical_list(conn):
                                   " platform_ids, amap_id FROM canonical_venues")]
 
 def refresh(conn, creds, config):
+    # 只做「抓取 + 入库」，秒级返回；通勤/POI 归类交给 compute_pending 后台跑
     today = date.today()
     seed_canonical_venues(conn, config)
-    canonical = load_canonical_list(conn)
-    origins_ll = {r["key"]: f"{r['lng']},{r['lat']}"
-                  for r in conn.execute("SELECT key,lat,lng FROM origins")
-                  if r["lat"] is not None and r["lng"] is not None}
     games, auth_failed, errors = [], [], []
     for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today)),
                         ("flashx", lambda c: _fetch_flashx(c, today))):
@@ -159,12 +159,45 @@ def refresh(conn, creds, config):
         games += got
         if bad:
             auth_failed.append(source)
-    upsert_games(conn, games)  # 先入库，保证 enrich 异常不丢球局
-    for g in games:
-        try:
-            enrich_venue(conn, g, canonical, origins_ll)
-        except Exception:  # 单个场馆的高德/编码异常只跳过该场馆
-            pass
-    upsert_games(conn, games)  # 写回 enrich 补上的 canonical_id/坐标
+    upsert_games(conn, games)
     return {"ok": not auth_failed and not errors, "count": len(games),
             "auth_failed": auth_failed, "errors": errors}
+
+def _origins_ll(conn):
+    return {r["key"]: f"{r['lng']},{r['lat']}"
+            for r in conn.execute("SELECT key,lat,lng FROM origins")
+            if r["lat"] is not None and r["lng"] is not None}
+
+def compute_pending(db_path, config):
+    # 后台线程用：自开连接。1) 给未归类/无坐标的球局补 规范馆+坐标+通勤；
+    # 2) 给已归类但缺通勤的场馆补算（如刚换了出发地）。按场馆缓存，可重复调。
+    conn = db.connect(db_path)
+    try:
+        canonical = load_canonical_list(conn)
+        origins_ll = _origins_ll(conn)
+        pending = [dict(r) for r in conn.execute(
+            "SELECT * FROM games WHERE canonical_id IS NULL OR lat IS NULL")]
+        done = []
+        for g in pending:
+            try:
+                enrich_venue(conn, g, canonical, origins_ll)
+                done.append(g)
+            except Exception:  # 单个场馆的高德/编码异常只跳过该场馆
+                pass
+        if done:
+            upsert_games(conn, done)  # 写回 enrich 补上的 canonical_id/坐标
+        _fill_missing_commute(conn, origins_ll)
+    finally:
+        conn.close()
+
+def _fill_missing_commute(conn, origins_ll):
+    # 按场馆(place_key)去重，给所有有坐标的场馆补缺失的通勤（换出发地后缓存被清会重算）
+    places = {}
+    for r in conn.execute("SELECT canonical_id, venue_key, lat, lng FROM games WHERE lat IS NOT NULL"):
+        pk = commute.place_key(r["canonical_id"], r["venue_key"])
+        places.setdefault(pk, commute.amap_coord(r["lat"], r["lng"]))
+    for pk, dest in places.items():
+        try:
+            _ensure_commute(conn, pk, dest, origins_ll)
+        except Exception:
+            pass
