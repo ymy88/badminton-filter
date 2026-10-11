@@ -18,8 +18,10 @@ def upsert_games(conn, games):
 def enrich_venue(conn, game, canonical_list, origins_ll):
     c = venues.classify(game["venue_name"], game["venue_key"], canonical_list)
     if c:
-        game["canonical_id"] = c["id"]; game["lat"], game["lng"] = c["lat"], c["lng"]
-    elif game["lat"] is None:  # 中羽联未归类，需地理编码
+        game["canonical_id"] = c["id"]
+        if c["lat"] is not None:  # 规范馆有坐标才覆盖；否则保留球局自带坐标（闪动带经纬度）
+            game["lat"], game["lng"] = c["lat"], c["lng"]
+    if game["lat"] is None:  # 仍缺坐标（中羽联未归类，或归到无坐标规范馆且球局自带也无）→ 地理编码
         row = conn.execute("SELECT lat,lng FROM venues WHERE venue_key=?",
                            (game["venue_key"],)).fetchone()
         if row and row["lat"] is not None:

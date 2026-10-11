@@ -84,8 +84,12 @@ def create_app(conn, config):
     return app
 
 if __name__ == "__main__":
-    with open("config.json", encoding="utf-8") as f:
-        cfg = json.load(f)
+    import sys
+    try:
+        with open("config.json", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        sys.exit("缺 config.json，请先：cp config.example.json config.json，再填家/公司地址与规范场馆")
     conn = db.connect("games.db")
     db.init_schema(conn)
     port = cfg.get("port", 8765)
