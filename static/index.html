@@ -37,6 +37,13 @@
   .tag { display: inline-block; padding: 0 6px; margin: 0 3px 2px 0; background: #e8eefc; border-radius: 8px; font-size: 12px; }
   .src { font-size: 12px; padding: 0 6px; border-radius: 3px; background: #ddd; }
   .muted { color: #999; }
+  .helpwrap { position: relative; display: inline-block; }
+  .help { cursor: pointer; display: inline-flex; width: 15px; height: 15px; border-radius: 50%;
+    background: #a9b0bd; color: #fff; font-size: 11px; font-weight: bold; align-items: center; justify-content: center; }
+  .pop { display: none; position: absolute; top: 120%; left: 0; z-index: 20; background: #333; color: #fff;
+    padding: 6px 9px; border-radius: 4px; font-size: 12px; font-weight: normal; white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .pop.show { display: block; }
   .chipbox { border: 1px solid #ccc; border-radius: 6px; padding: 2px 4px; display: flex;
     flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; min-width: 180px; align-items: center; cursor: text; background: #fff; }
   .chip { background: #e0e7ff; border-radius: 10px; padding: 1px 6px; font-size: 12px;
@@ -118,7 +125,7 @@
     <div id="count" class="muted"></div>
     <table>
       <thead><tr>
-        <th class="s" data-sort="start_time">时间</th><th>时长</th><th title="上一行：平台读取到的名字&#10;下一行：高德地图搜到的名字">场馆</th><th class="s" data-sort="club">俱乐部</th>
+        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆 <span class="helpwrap"><span class="help" id="venueHelp">?</span><span class="pop" id="venuePop">上一行：平台读取到的名字<br>下一行：高德地图搜到的名字</span></span></th><th class="s" data-sort="club">俱乐部</th>
         <th class="s" data-sort="commute_home">家通勤</th><th class="s" data-sort="commute_company">公司通勤</th><th class="s" data-sort="price">价格</th>
         <th class="s" data-sort="applied">报名</th><th>来源</th><th>标签</th>
       </tr></thead>
@@ -235,7 +242,7 @@ function rowHtml(g) {
   const venue = esc(g.venue_name || "") + (g.canonical_name ? `<br><span class="muted">${esc(g.canonical_name)}</span>` : "");
   const tags = parseTags(g.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
   return `<tr class="row"><td>${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
-    <td>${fmtDur(g.duration_min)}</td><td title="上一行：平台读取到的名字&#10;下一行：高德地图搜到的名字">${venue}</td><td>${esc(g.club_name || "—")}</td>
+    <td>${fmtDur(g.duration_min)}</td><td>${venue}</td><td>${esc(g.club_name || "—")}</td>
     <td>${fmtCommute(g.commute?.home)}</td><td>${fmtCommute(g.commute?.company)}</td><td>${g.price == null ? "—" : esc(g.price)}</td>
     <td>${esc(g.applied_num)}/${esc(g.total_num)}</td>
     <td><span class="src">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
@@ -299,6 +306,9 @@ document.querySelectorAll("#form input, #form select, header input, #sortBy").fo
   el.addEventListener("change", render);
 });
 document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; render(); }));
+// 场馆列说明：点「?」图标弹/收说明，点别处收起
+$("venueHelp").onclick = (e) => { e.stopPropagation(); $("venuePop").classList.toggle("show"); };
+document.addEventListener("click", (e) => { if (!e.target.closest(".helpwrap")) $("venuePop").classList.remove("show"); });
 $("tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr.row");
   if (tr) { const d = tr.nextElementSibling; d.style.display = d.style.display === "none" ? "" : "none"; }
