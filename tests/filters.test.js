@@ -44,4 +44,21 @@ const s = sortGames([g({ source_id: "a" }), g({ source_id: "b", commute: { home:
   "commute", "home", "drive_min");
 assert.equal(s[0].source_id, "b");
 
+// 排序：开始时间升序
+assert.equal(sortGames([g({ source_id: "a", start_time: "20:00" }), g({ source_id: "b", start_time: "08:00" })],
+  "start_time")[0].source_id, "b");
+// 排序：价格升序
+assert.equal(sortGames([g({ source_id: "a", price: 50 }), g({ source_id: "b", price: 10 })],
+  "price")[0].source_id, "b");
+// 排序：剩余空位升序（总−已报 小的在前）
+assert.equal(sortGames([g({ source_id: "a", applied_num: 2, total_num: 12 }), g({ source_id: "b", applied_num: 11, total_num: 12 })],
+  "open")[0].source_id, "b");
+// 排序：已报名升序
+assert.equal(sortGames([g({ source_id: "a", applied_num: 9 }), g({ source_id: "b", applied_num: 1 })],
+  "applied")[0].source_id, "b");
+// 排序：缺失值排最后（price 为 null 的排在后面）
+const sn = sortGames([g({ source_id: "a", price: null }), g({ source_id: "b", price: 10 })], "price");
+assert.equal(sn[0].source_id, "b");
+assert.equal(sn[1].source_id, "a");
+
 console.log("filters.js OK");

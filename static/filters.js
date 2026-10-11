@@ -7,9 +7,9 @@ function startMinutes(t) {
   return h * 60 + m;
 }
 
-// 关键字/场馆双向匹配：include 命中任一即保留，exclude 命中任一即剔除；空数组跳过
+// 关键字/场馆双向匹配：include 命中任一即保留，exclude 命中任一即剔除；空数组/空串跳过
 function textHit(text, list) {
-  return list.some((s) => text.includes(s));
+  return list.some((s) => s && text.includes(s));
 }
 
 // 逐条过筛选条件，空条件（null/空数组/undefined）跳过
@@ -54,19 +54,33 @@ function applyFilters(games, criteria) {
   });
 }
 
-// 按通勤升序；通勤未知排最后。返回新数组，不改入参
+// 排序取值表：by → 取数值的函数（全为数值，null/缺失统一排最后）
+// 对应设计文档排序键：开始时间/通勤/价格/剩余空位(总−已报)/已报名
+function sortKey(by, origin, mode) {
+  switch (by) {
+    case "commute": return (g) => g.commute?.[origin]?.[mode];
+    case "start_time": return (g) => startMinutes(g.start_time);
+    case "price": return (g) => g.price;
+    case "open": return (g) =>
+      g.total_num != null && g.applied_num != null ? g.total_num - g.applied_num : null;
+    case "applied": return (g) => g.applied_num;
+    default: return null;
+  }
+}
+
+// 按 by 升序；缺失值排最后。返回新数组，不改入参；未知 by 原样返回副本
 function sortGames(games, by, origin, mode) {
   const out = games.slice();
-  if (by === "commute") {
-    const key = (g) => g.commute?.[origin]?.[mode];
-    out.sort((a, b) => {
-      const x = key(a), y = key(b);
-      if (x == null && y == null) return 0;
-      if (x == null) return 1;
-      if (y == null) return -1;
-      return x - y;
-    });
-  }
+  const key = sortKey(by, origin, mode);
+  if (!key) return out;
+  const isNull = (v) => v == null || Number.isNaN(v);
+  out.sort((a, b) => {
+    const x = key(a), y = key(b);
+    if (isNull(x) && isNull(y)) return 0;
+    if (isNull(x)) return 1;
+    if (isNull(y)) return -1;
+    return x - y;
+  });
   return out;
 }
 
