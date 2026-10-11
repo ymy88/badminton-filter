@@ -1,0 +1,11 @@
+# 凭证与数据（含登录态，绝不入库）
+creds.json
+games.db
+*.mitm
+flows*.mitm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
