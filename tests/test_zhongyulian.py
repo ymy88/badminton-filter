@@ -50,3 +50,9 @@ def test_time_malformed():
     assert g["start_time"] is None and g["duration_min"] is None
     g2 = z.parse_games(_resp([_item(time="08:00~22:30")]), 0, TODAY)[0]
     assert g2["duration_min"] == 870
+    # 无 "~" 分隔：起止与时长都为 None
+    g3 = z.parse_games(_resp([_item(time="19:00")]), 0, TODAY)[0]
+    assert g3["start_time"] is None and g3["duration_min"] is None
+    # 跨零点（负时长）：不产生负数
+    g4 = z.parse_games(_resp([_item(time="22:00~08:00")]), 0, TODAY)[0]
+    assert g4["duration_min"] is None
