@@ -45,7 +45,11 @@ def create_app(conn, config):
 
     @app.post("/api/origins")
     def save_origins():
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            return jsonify({"ok": False, "msg": "body 须为 JSON 对象"}), 400
         old = {r["key"]: r["address"] for r in conn.execute("SELECT key,address FROM origins")}
         res = {}
         for o in ORIGINS:
@@ -71,7 +75,7 @@ def create_app(conn, config):
     @app.post("/api/creds/capture")
     def capture():
         got = creds.capture() or {}
-        return jsonify({p: p in got for p in ("zhongyulian", "flashx")})
+        return jsonify({p: bool(v) for p, v in got.items()})
 
     return app
 
