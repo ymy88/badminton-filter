@@ -1,8 +1,14 @@
 # commute.py
 import os, time, json, urllib.parse, urllib.request
+from datetime import date, timedelta
 
 BASE = "https://restapi.amap.com"
 CITY = "上海"
+DEPART_TIME = "18:00"  # 公交默认按"现在"出发，午夜会按停运算；统一用傍晚代表时刻（去球局的通勤时段）
+
+def _depart():
+    # 公交出发时间：明天傍晚（保证在未来、有运营；按场馆缓存故用统一代表时刻）
+    return (date.today() + timedelta(days=1)).isoformat(), DEPART_TIME
 
 def _key():
     return os.environ["GAO_DE_MAP_API_KEY"]
@@ -63,9 +69,10 @@ def _duration_min(resp, key):
 def route_minutes(origin_ll, dest_ll):
     drive = _amap_get(f"{BASE}/v3/direction/driving",
                       {"origin": origin_ll, "destination": dest_ll})
+    d, t = _depart()
     transit = _amap_get(f"{BASE}/v3/direction/transit/integrated",
                         {"origin": origin_ll, "destination": dest_ll,
-                         "city": CITY, "cityd": CITY})
+                         "city": CITY, "cityd": CITY, "date": d, "time": t})
     dm = _duration_min(drive, "paths")
     tm = _duration_min(transit, "transits")
     time.sleep(0.3)  # 节流，避开 QPS
