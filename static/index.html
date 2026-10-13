@@ -368,9 +368,7 @@ function pollCommute(baseMsg) {
     catch { _pollTimer = setTimeout(tick, 2000); return; }
     if (s.commute_places !== last) { last = s.commute_places; await loadGames(); }
     if (s.computing) {
-      const p = s.progress;  // [阶段, 已完成, 总数]
-      const stage = p ? `${p[0] === "venue" ? "归类球局场馆" : "算各场馆通勤"} ${p[1]}/${p[2]}` : "准备中";
-      $("status").textContent = `${pre}通勤后台计算中… ${stage}（已有通勤 ${s.commute_places} 条）`;
+      $("status").textContent = `${pre}通勤后台计算中… ${s.progress || "准备中"}（已有通勤 ${s.commute_places} 条）`;
       _pollTimer = setTimeout(tick, 2000);
     } else {
       await loadGames();
@@ -392,8 +390,7 @@ function pollRefresh() {
     try { s = await api("/api/refresh/status"); }
     catch { _refreshTimer = setTimeout(tick, 2000); return; }
     if (s.refreshing) {
-      const p = s.progress;  // [已请求, 总请求]（闪动翻页后总数会变大）
-      $("status").textContent = `刷新球局中… 已拉取 ${p ? `${p[0]}/${p[1]}` : "0/?"} 页`;
+      $("status").textContent = `刷新球局中… ${s.progress || "准备中"}`;
       _refreshTimer = setTimeout(tick, 2000);
     } else {
       const r = s.result || {};

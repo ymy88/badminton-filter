@@ -98,17 +98,17 @@ def _call(source, fn, *args):
         body = e.read().decode(errors="replace")
         return body, creds_mod.is_auth_failure(source, body, e.code)
 
-def _fetch_zhongyulian(cr, today, tick):
+def _fetch_zhongyulian(cr, today, progress):
     games = []
     for day in range(3):  # 今天/明天/后天
-        text, bad = _call("zhongyulian", zhongyulian.fetch, cr, day)
-        tick()
+        text, bad = _call("zhongyulian", zhongyulian.fetch, cr, day,
+                          lambda n: progress(f"中羽联 第 {day + 1}/3 天 · 已翻 {n} 页"))
         if bad:
             return games, True
         games += zhongyulian.parse_games(text, day, today)
     return games, False
 
-def _fetch_flashx(cr, today, tick):
+def _fetch_flashx(cr, today, progress):
     games = []
     for i in range(3):  # 今天/明天/后天
         d = (today + timedelta(days=i)).isoformat()
@@ -122,7 +122,7 @@ def _fetch_flashx(cr, today, tick):
                 pages = int(json.loads(text)["result"]["pages"])
             except (ValueError, KeyError, TypeError):
                 pages = 0
-            tick(max(pages, 1) - 1 if page == 1 else 0)  # 首页才知道总页数，补进总数
+            progress(f"闪动 第 {i + 1}/3 天 · 已翻 {page} 页")  # 首页的 pages 是封顶假值(100)，不报总数
             page += 1
     return games, False
 
@@ -150,20 +150,14 @@ def load_canonical_list(conn):
             for r in conn.execute("SELECT id, canonical_name, lat, lng, name_patterns,"
                                   " platform_ids, amap_id FROM canonical_venues")]
 
-def refresh(conn, creds, config, progress=lambda *p: None):
+def refresh(conn, creds, config, progress=lambda msg: None):
     # 只做「抓取 + 入库」，秒级返回；通勤/POI 归类交给 compute_pending 后台跑
-    # progress(已请求, 总请求)：两平台各 3 天先按每天 1 页估，闪动拿到总页数后补
+    # progress(文字)：每发完一个请求报一次（两平台都给不出可信的总页数，只报已翻页数）
     today = date.today()
-    st = {"done": 0, "total": 6}
-    def tick(more=0):
-        st["done"] += 1
-        st["total"] += more
-        progress(st["done"], st["total"])
-    progress(0, st["total"])
     seed_canonical_venues(conn, config)
     games, auth_failed, errors = [], [], []
-    for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today, tick)),
-                        ("flashx", lambda c: _fetch_flashx(c, today, tick))):
+    for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today, progress)),
+                        ("flashx", lambda c: _fetch_flashx(c, today, progress))):
         if not creds.get(source):
             auth_failed.append(source)  # 没凭证 → 当作凭证失效，界面提示去「抓取凭证」
             continue
@@ -184,10 +178,10 @@ def _origins_ll(conn):
             for r in conn.execute("SELECT key,lat,lng FROM origins")
             if r["lat"] is not None and r["lng"] is not None}
 
-def compute_pending(db_path, config, progress=lambda *p: None):
+def compute_pending(db_path, config, progress=lambda msg: None):
     # 后台线程用：自开连接。1) 给未归类/无坐标的球局补 规范馆+坐标+通勤；
     # 2) 给已归类但缺通勤的场馆补算（如刚换了出发地）。按场馆缓存，可重复调。
-    # progress(阶段, 已完成, 总数)：阶段 "venue" 逐条球局归类，"commute" 逐个场馆算通勤
+    # progress(文字)：先逐条球局归类场馆，再逐个场馆算通勤
     conn = db.connect(db_path)
     try:
         canonical = load_canonical_list(conn)
@@ -201,7 +195,7 @@ def compute_pending(db_path, config, progress=lambda *p: None):
                 done.append(g)
             except Exception:  # 单个场馆的高德/编码异常只跳过该场馆
                 pass
-            progress("venue", i, len(pending))
+            progress(f"归类球局场馆 {i}/{len(pending)}")
         if done:
             upsert_games(conn, done)  # 写回 enrich 补上的 canonical_id/坐标
         _fill_missing_commute(conn, origins_ll, progress)
@@ -219,7 +213,7 @@ def _fill_missing_commute(conn, origins_ll, progress):
             _ensure_commute(conn, pk, dest, origins_ll)
         except Exception:
             pass
-        progress("commute", i, len(places))
+        progress(f"算各场馆通勤 {i}/{len(places)}")
 
 def pending_count(conn):
     # 还需补数据的场馆数：无坐标(POI/geocode 失败) + 有坐标但缺某出发地通勤

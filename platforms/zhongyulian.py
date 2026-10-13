@@ -1,6 +1,6 @@
 # platforms/zhongyulian.py
 import json
-import urllib.request
+import urllib.error, urllib.request
 from datetime import timedelta
 
 def _split_time(t):
@@ -68,13 +68,22 @@ def _post(creds, day, skip):
             "timestamp": 0, "sign": "0" * 32}  # sign/timestamp 服务端不校验
     req = urllib.request.Request(_URL, json.dumps(body).encode(),
                                  headers=creds.get("headers") or {}, method="POST")
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return r.read().decode()
+    for attempt in (1, 2):  # 超时/断网重试一次；HTTP 错误(鉴权等)不重试，交调用方判断
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.read().decode()
+        except urllib.error.HTTPError:
+            raise
+        except OSError:
+            if attempt == 2:
+                raise
 
-def fetch(creds, day):
+def fetch(creds, day, on_page=lambda n: None):
     """返回合并后的响应文本：my 列表取首页（一次全返回），other 列表按 skip 翻完。
-    首页不是 ok==1（鉴权失败/Fatal error HTML）时原样返回，交调用方判断。"""
+    首页不是 ok==1（鉴权失败/Fatal error HTML）时原样返回，交调用方判断。
+    on_page(已翻页数)：每请求完一页回调一次（没有总条数，只能报已翻几页）。"""
     first = _post(creds, day, 0)
+    on_page(1)
     try:
         data = json.loads(first)
     except ValueError:
@@ -89,8 +98,9 @@ def fetch(creds, day):
             break
         try:
             d = json.loads(_post(creds, day, _PAGE * i))
+            on_page(i + 1)
             page = ((d.get("list") or {}).get("other_club_movement_list") or [])
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, OSError):  # 翻页中途网络失败：保留已拿到的页
             break
         if not page:
             break

@@ -56,3 +56,24 @@ def test_time_malformed():
     # 跨零点（负时长）：不产生负数
     g4 = z.parse_games(_resp([_item(time="22:00~08:00")]), 0, TODAY)[0]
     assert g4["duration_min"] is None
+
+def test_fetch_keeps_pages_when_later_page_fails(monkeypatch):
+    # 首页满 10 条，第 2 页重试后仍超时 → 不整体失败，保留首页
+    import json
+    from platforms import zhongyulian as z
+    calls = []
+    class R:
+        def __init__(self, b): self.b = b
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self): return self.b
+    def fake_urlopen(req, timeout):
+        skip = json.loads(req.data)["skip"]
+        calls.append(skip)
+        if skip:
+            raise TimeoutError("read timed out")
+        return R(json.dumps({"ok": 1, "list": {"other_club_movement_list": [{"activity_id": str(i)} for i in range(10)]}}).encode())
+    monkeypatch.setattr(z.urllib.request, "urlopen", fake_urlopen)
+    out = json.loads(z.fetch({"skey": "k"}, 0))
+    assert len(out["list"]["other_club_movement_list"]) == 10
+    assert calls == [0, 10, 10]  # 第 2 页重试了一次

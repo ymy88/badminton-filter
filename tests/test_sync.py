@@ -118,8 +118,8 @@ def test_refresh_no_creds_reports_auth_failed():
 def test_refresh_stores_games_without_computing_commute(monkeypatch):
     # 刷新只入库、秒回，不在请求里算通勤（通勤交给 compute_pending 后台）
     conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync, "_fetch_flashx", lambda cr, today, tick: ([_g(source_id="1", lat=31.1, lng=121.5)], False))
-    monkeypatch.setattr(sync, "_fetch_zhongyulian", lambda cr, today, tick: ([], False))
+    monkeypatch.setattr(sync, "_fetch_flashx", lambda cr, today, progress: ([_g(source_id="1", lat=31.1, lng=121.5)], False))
+    monkeypatch.setattr(sync, "_fetch_zhongyulian", lambda cr, today, progress: ([], False))
     r = sync.refresh(conn, {"flashx": {"x": 1}, "zhongyulian": {"x": 1}}, {})
     assert r["count"] == 1 and r["ok"] is True
     assert conn.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1
@@ -139,17 +139,21 @@ def test_compute_pending_fills_commute(tmp_path, monkeypatch):
     sync.compute_pending(p, {}, progress=lambda *a: prog.append(a))
     conn = db.connect(p)
     assert conn.execute("SELECT drive_min FROM commute").fetchone()["drive_min"] == 18
-    assert prog == [("venue", 1, 1), ("commute", 1, 1)]
+    assert prog == [("归类球局场馆 1/1",), ("算各场馆通勤 1/1",)]
 
-def test_refresh_progress_grows_with_flashx_pages(monkeypatch):
-    # 进度按请求数：先按每天 1 页估(共 6)，闪动首页拿到总页数后补进总数
+def test_refresh_progress_per_request(monkeypatch):
+    # 每发完一个请求报一次进度：第几天 + 已翻页数
     conn = db.connect(":memory:"); db.init_schema(conn)
     monkeypatch.setattr(sync.flashx, "fetch", lambda cr, d, page: '{"result":{"pages":2}}')
     monkeypatch.setattr(sync.flashx, "parse_games", lambda t: [])
+    monkeypatch.setattr(sync.zhongyulian, "_post", lambda cr, day, skip: '{"ok":1,"list":{"other_club_movement_list":'
+                        + ('[{}]' if skip else '[' + ','.join(['{}'] * 10) + ']') + '}}')  # 首页满 10 条 → 再翻一页
+    monkeypatch.setattr(sync.zhongyulian, "parse_games", lambda t, d, today: [])
     monkeypatch.setattr(sync.creds_mod, "is_auth_failure", lambda *a: False)
     prog = []
-    sync.refresh(conn, {"flashx": {"x": 1}}, {}, progress=lambda *a: prog.append(a))
-    assert prog[0] == (0, 6) and prog[-1] == (6, 9)  # 中羽联无凭证跳过；闪动 3 天×2 页
+    sync.refresh(conn, {"flashx": {"x": 1}, "zhongyulian": {"x": 1}}, {}, progress=prog.append)
+    assert prog[:2] == ["中羽联 第 1/3 天 · 已翻 1 页", "中羽联 第 1/3 天 · 已翻 2 页"]
+    assert len(prog) == 12 and prog[-1] == "闪动 第 3/3 天 · 已翻 2 页"
 
 def test_pending_count_counts_unresolved_and_missing_commute():
     conn = db.connect(":memory:"); db.init_schema(conn)

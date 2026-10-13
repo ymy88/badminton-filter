@@ -53,14 +53,14 @@ def test_refresh_runs_in_background(monkeypatch, tmp_path):
     conn = db.connect(":memory:"); db.init_schema(conn)
     gate = threading.Event()
     def fake_refresh(c, cr, cfg, progress):
-        progress(3, 9)
+        progress("闪动 第 1/3 天 · 已翻 2 页")
         gate.wait(2)
         return {"ok": True, "count": 7, "auth_failed": [], "errors": []}
     monkeypatch.setattr(sync, "refresh", fake_refresh)
     client = appmod.create_app(conn, {}, db_path=str(tmp_path / "x.db")).test_client()
     r = client.post("/api/refresh").get_json()
     assert r["refreshing"] is True and r["result"] is None   # 立刻返回，不阻塞
-    assert _wait(lambda: client.get("/api/refresh/status").get_json()["progress"] == [3, 9])
+    assert _wait(lambda: client.get("/api/refresh/status").get_json()["progress"] == "闪动 第 1/3 天 · 已翻 2 页")
     assert client.get("/api/refresh/status").get_json()["refreshing"] is True
     gate.set()
     assert _wait(lambda: client.get("/api/refresh/status").get_json()["refreshing"] is False)

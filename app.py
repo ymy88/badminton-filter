@@ -1,5 +1,5 @@
 # app.py
-import json, threading, webbrowser
+import json, threading, time, webbrowser
 from pypinyin import Style, lazy_pinyin
 from flask import Flask, jsonify, request, send_from_directory
 import commute, creds, db, sync
@@ -12,7 +12,7 @@ def create_app(conn, config, db_path=None):
     compute_rerun = threading.Event()  # 运行期间又被触发 → 跑完再补一轮
     refresh_lock = threading.Lock()   # 保证同时只有一个后台拉取任务
     refresh_box = {"result": None, "progress": None}  # 最近一次拉取结果/进度（供前端轮询取回）
-    compute_box = {"progress": None}  # 后台算通勤进度 (阶段, 已完成, 总数)
+    compute_box = {"progress": None}  # 后台算通勤进度文字
 
     @app.get("/")
     def index():
@@ -117,7 +117,8 @@ def create_app(conn, config, db_path=None):
                 while True:
                     compute_rerun.clear()
                     compute_box["progress"] = None
-                    sync.compute_pending(db_path, config, progress=_setter(compute_box))
+                    sync.compute_pending(db_path, config, progress=_setter(compute_box, "算通勤"))
+                    print(f"[算通勤] 完成：{compute_box['progress'] or '无需计算'}", flush=True)
                     if not compute_rerun.is_set():
                         break  # 期间无新触发才收工
             finally:
@@ -127,13 +128,20 @@ def create_app(conn, config, db_path=None):
         threading.Thread(target=bg, daemon=True).start()
         return True
 
-    def _setter(box):
-        return lambda *p: box.__setitem__("progress", p)
+    def _setter(box, tag):
+        # 进度存进 box 供前端轮询，同时打到 console（每秒最多一行，免得缓存命中时刷屏）
+        last = [0.0]
+        def set_(msg):
+            box["progress"] = msg
+            if time.monotonic() - last[0] >= 1:
+                last[0] = time.monotonic()
+                print(f"[{tag}] {msg}", flush=True)
+        return set_
 
     def _start_refresh():
         # 后台拉取入库，不阻塞请求（拉取 1333 场 + 解析较慢，同步会冻住单线程服务）
         if not db_path:  # 无 db_path(测试)：同步跑，用主连接
-            refresh_box["result"] = sync.refresh(conn, creds.load(), config, progress=_setter(refresh_box))
+            refresh_box["result"] = sync.refresh(conn, creds.load(), config, progress=_setter(refresh_box, "刷新"))
             return False
         if not refresh_lock.acquire(blocking=False):
             return True  # 已在拉取
@@ -142,7 +150,8 @@ def create_app(conn, config, db_path=None):
                 refresh_box["progress"] = None
                 c = db.connect(db_path)
                 try:
-                    refresh_box["result"] = sync.refresh(c, creds.load(), config, progress=_setter(refresh_box))
+                    refresh_box["result"] = sync.refresh(c, creds.load(), config, progress=_setter(refresh_box, "刷新"))
+                    print(f"[刷新] 完成：{refresh_box['result']}", flush=True)
                 finally:
                     c.close()
             finally:
