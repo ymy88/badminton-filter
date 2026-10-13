@@ -1,6 +1,6 @@
 // 前端筛选纯函数自测：node tests/filters.test.js
 const assert = require("assert");
-const { applyFilters, sortGames } = require("../static/filters.js");
+const { applyFilters, sortGames, pyMatch } = require("../static/filters.js");
 
 const g = (o) => Object.assign({
   date: "2026-10-11", start_time: "19:00", duration_min: 120,
@@ -98,3 +98,12 @@ assert.equal(applyFilters([g({ raw_text: "练球" }), g({ raw_text: "双打" })]
 assert.equal(applyFilters([g({ venue_name: "万体汇" })], { venueInclude: [""] }).length, 1);
 
 console.log("filters.js OK");
+
+// 下拉拼音匹配：原文 / 全拼 / 首字母，大小写不敏感；没拼音数据时只按原文
+const py = ["wantihui", "wth"];
+assert.ok(pyMatch("万体汇", "体汇", py));
+assert.ok(pyMatch("万体汇", "wanti", py));
+assert.ok(pyMatch("万体汇", "WTH", py));
+assert.ok(!pyMatch("万体汇", "xyz", py));
+assert.ok(!pyMatch("万体汇", "wth", undefined));
+assert.ok(pyMatch("万体汇", "", py));

@@ -32,8 +32,8 @@ def init_schema(conn):
       walk_m INTEGER, computed_at TEXT, PRIMARY KEY(origin, place_key));
     CREATE TABLE IF NOT EXISTS origins(
       key TEXT PRIMARY KEY, address TEXT, lat REAL, lng REAL);
-    CREATE TABLE IF NOT EXISTS keywords(
-      word TEXT PRIMARY KEY, in_include INTEGER DEFAULT 0, in_exclude INTEGER DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS kw_history(word TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS filters(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT);
     """)
     # 旧库迁移：后加列，已存在则忽略
     for stmt in ("ALTER TABLE canonical_venues ADD COLUMN amap_id TEXT",

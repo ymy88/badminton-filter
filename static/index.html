@@ -163,32 +163,65 @@ function makeChips(boxId, getOptions, { allowNew = false, onChange = () => {} } 
     });
   };
   const add = (v) => { v = v.trim(); if (v && !vals.includes(v)) { vals.push(v); renderChips(); onChange(); } input.value = ""; showDD(); };
+  const item = (label, v) => {
+    const it = document.createElement("div"); it.textContent = label; it._v = v;
+    it.onmousedown = (e) => { e.preventDefault(); add(v); }; dd.appendChild(it);
+  };
   const showDD = () => {
     const q = input.value.trim();
-    let opts = getOptions().filter((o) => !vals.includes(o) && (!q || o.includes(q)));
+    const opts = getOptions().filter((o) => !vals.includes(o) && pyMatch(o, q, PY[o]));
     dd.innerHTML = "";
-    if (allowNew && q && !opts.includes(q) && !vals.includes(q)) {
-      const it = document.createElement("div"); it.textContent = `＋ 新增「${q}」`;
-      it.onmousedown = (e) => { e.preventDefault(); add(q); }; dd.appendChild(it);
-    }
-    opts.slice(0, 50).forEach((o) => {
-      const it = document.createElement("div"); it.textContent = o;
-      it.onmousedown = (e) => { e.preventDefault(); add(o); }; dd.appendChild(it);
-    });
+    // 「新增」项：输入含中文时放最前；纯字母（多半在打拼音）时放最后，回车优先选匹配项
+    const isNew = allowNew && q && !opts.includes(q) && !vals.includes(q), ascii = /^[\x00-\x7f]*$/.test(q);
+    if (isNew && !ascii) item(`＋ 新增「${q}」`, q);
+    opts.slice(0, 50).forEach((o) => item(o, o));
+    if (isNew && ascii) item(`＋ 新增「${q}」`, q);
     dd.style.display = dd.children.length ? "block" : "none";
   };
   input.addEventListener("focus", showDD);
   input.addEventListener("input", showDD);
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && allowNew && input.value.trim()) { e.preventDefault(); add(input.value); }
+    if (e.key === "Enter" && input.value.trim()) { e.preventDefault(); if (dd.firstChild) add(dd.firstChild._v); }
     else if (e.key === "Backspace" && !input.value && vals.length) { vals.pop(); renderChips(); onChange(); showDD(); }
   });
   box.addEventListener("click", () => input.focus());
   document.addEventListener("click", (e) => { if (!box.contains(e.target)) dd.style.display = "none"; });
   return { values: () => vals.slice(), set: (arr) => { vals.length = 0; (arr || []).forEach((v) => { if (v && !vals.includes(v)) vals.push(v); }); renderChips(); } };
 }
-let venueIncC, venueExcC, clubIncC, clubExcC, kwIncC, kwExcC;
+const chips = {};          // 胶囊控件：id → 控件（id 同时是存库的字段名）
 const kwSeen = new Set();  // 用过的关键字（下拉候选）
+const PY = {};             // 下拉候选文本 → [全拼, 首字母]
+
+// 给下拉候选补拼音（只查缓存里没有的）；查不到只影响拼音匹配
+async function ensurePinyin(texts) {
+  const need = [...new Set(texts)].filter((t) => t && !(t in PY));
+  if (!need.length) return;
+  try { Object.assign(PY, await api("/api/pinyin", { texts: need })); } catch (e) { /* 忽略 */ }
+}
+
+// 筛选条件整份存库，页面加载时恢复
+const FIELDS = ["date", "timeBucket", "dur", "priceMax", "homeCommuteMax", "companyCommuteMax", "unkCommute",
+  "apMin", "apMax", "toMin", "toMax", "onlyOpen", "sortBy"];
+function formState() {
+  const f = { mode: radio("mode") };
+  FIELDS.forEach((id) => { const el = $(id); f[id] = el.type === "checkbox" ? el.checked : el.value; });
+  for (const [id, c] of Object.entries(chips)) f[id] = c.values();
+  return f;
+}
+function applyFormState(f) {
+  if (!f) return;
+  FIELDS.forEach((id) => { if (id in f) { const el = $(id); if (el.type === "checkbox") el.checked = !!f[id]; else el.value = f[id]; } });
+  const m = document.querySelector(`input[name=mode][value="${f.mode}"]`);
+  if (m) m.checked = true;
+  for (const [id, c] of Object.entries(chips)) c.set(f[id]);
+}
+let _saveTimer = null;
+function saveFilters() {  // 防抖：连续输入数字只存最后一次
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => api("/api/filters", formState())
+    .catch((e) => { $("status").textContent = "筛选条件保存失败：" + e; }), 300);
+}
+const onFormChange = () => { render(); saveFilters(); };
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {
@@ -210,12 +243,12 @@ function buildCriteria() {
     mode: radio("mode"),
     homeCommuteMax: num("homeCommuteMax"), companyCommuteMax: num("companyCommuteMax"),
     includeUnknownCommute: $("unkCommute").checked,
-    venueInclude: venueIncC.values(), venueExclude: venueExcC.values(),
-    clubInclude: clubIncC.values(), clubExclude: clubExcC.values(),
+    venueInclude: chips.venueInc.values(), venueExclude: chips.venueExc.values(),
+    clubInclude: chips.clubInc.values(), clubExclude: chips.clubExc.values(),
     priceMax: num("priceMax"),
     appliedRange: range("apMin", "apMax"), totalRange: range("toMin", "toMax"),
     onlyOpen: $("onlyOpen").checked,
-    kwInclude: kwIncC.values(), kwExclude: kwExcC.values(),
+    kwInclude: chips.kwInc.values(), kwExclude: chips.kwExc.values(),
   };
 }
 
@@ -261,6 +294,7 @@ function render() {
 async function loadGames() {
   window._games = (await api("/api/games")).games;
   render();
+  ensurePinyin([...venueOptions(), ...clubOptions(), ...kwOptions()]);
 }
 
 function applyOrigins(o) {
@@ -273,23 +307,15 @@ function applyOrigins(o) {
 const venueOptions = () => [...new Set(window._games.flatMap((g) => [g.venue_name, g.canonical_name]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
 const clubOptions = () => [...new Set(window._games.map((g) => g.club_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
 const kwOptions = () => [...new Set([...kwSeen, ...window._games.flatMap((g) => parseTags(g.tags))])].sort((a, b) => a.localeCompare(b, "zh"));
-function saveKeywords() {
-  api("/api/keywords", { include: kwIncC.values(), exclude: kwExcC.values() })
-    .catch((e) => { $("status").textContent = "关键字保存失败：" + e; });
-}
 
 async function init() {
   const [cfg, org] = await Promise.all([api("/api/config"), api("/api/origins")]);
-  venueIncC = makeChips("venueInc", venueOptions, { onChange: render });
-  venueExcC = makeChips("venueExc", venueOptions, { onChange: render });
-  clubIncC = makeChips("clubInc", clubOptions, { onChange: render });
-  clubExcC = makeChips("clubExc", clubOptions, { onChange: render });
-  const kwChanged = () => { [...kwIncC.values(), ...kwExcC.values()].forEach((v) => kwSeen.add(v)); render(); saveKeywords(); };
-  kwIncC = makeChips("kwInc", kwOptions, { allowNew: true, onChange: kwChanged });
-  kwExcC = makeChips("kwExc", kwOptions, { allowNew: true, onChange: kwChanged });
+  for (const id of ["venueInc", "venueExc"]) chips[id] = makeChips(id, venueOptions, { onChange: onFormChange });
+  for (const id of ["clubInc", "clubExc"]) chips[id] = makeChips(id, clubOptions, { onChange: onFormChange });
+  const kwChanged = () => { [...chips.kwInc.values(), ...chips.kwExc.values()].forEach((v) => kwSeen.add(v)); onFormChange(); };
+  for (const id of ["kwInc", "kwExc"]) chips[id] = makeChips(id, kwOptions, { allowNew: true, onChange: kwChanged });
   (cfg.kw_history || []).forEach((v) => kwSeen.add(v));  // 打过的词永久进下拉候选
-  kwIncC.set(cfg.keywords?.include || []);
-  kwExcC.set(cfg.keywords?.exclude || []);
+  applyFormState(cfg.filters);
   applyOrigins(org);
   await loadGames();
   // 刷新网页时若后台拉取/通勤还在跑，恢复进度显示并禁用对应按钮
@@ -300,12 +326,12 @@ async function init() {
   } catch (e) { /* 状态查不到不影响主流程 */ }
 }
 
-// 筛选控件、出发地、方式、排序：改动即重渲染（场馆/关键字胶囊通过各自 onChange 触发；关键字另存库）
+// 筛选控件、方式、排序：改动即重渲染并存库（胶囊控件通过各自 onChange 触发）
 document.querySelectorAll("#form input, #form select, header input, #sortBy").forEach((el) => {
-  el.addEventListener("input", render);
-  el.addEventListener("change", render);
+  el.addEventListener("input", onFormChange);
+  el.addEventListener("change", onFormChange);
 });
-document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; render(); }));
+document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; onFormChange(); }));
 // 场馆列说明：点「?」图标弹/收说明，点别处收起
 $("venueHelp").onclick = (e) => { e.stopPropagation(); $("venuePop").classList.toggle("show"); };
 document.addEventListener("click", (e) => { if (!e.target.closest(".helpwrap")) $("venuePop").classList.remove("show"); });
@@ -331,7 +357,7 @@ $("addrSave").onclick = async () => {
 };
 
 let _pollTimer = null;
-// 通勤在后台算：每 5s 查进度，有新结果就重渲染列表；算完停
+// 通勤在后台算：每 2s 查进度，有新结果就重渲染列表；算完停
 function pollCommute(baseMsg) {
   if (_pollTimer) clearTimeout(_pollTimer);
   const pre = baseMsg ? baseMsg + "　" : "";
@@ -339,11 +365,13 @@ function pollCommute(baseMsg) {
   const tick = async () => {
     let s;
     try { s = await api("/api/commute/status"); }
-    catch { _pollTimer = setTimeout(tick, 5000); return; }
+    catch { _pollTimer = setTimeout(tick, 2000); return; }
     if (s.commute_places !== last) { last = s.commute_places; await loadGames(); }
     if (s.computing) {
-      $("status").textContent = `${pre}通勤后台计算中…（已算 ${s.commute_places}）`;
-      _pollTimer = setTimeout(tick, 5000);
+      const p = s.progress;  // [阶段, 已完成, 总数]
+      const stage = p ? `${p[0] === "venue" ? "归类球局场馆" : "算各场馆通勤"} ${p[1]}/${p[2]}` : "准备中";
+      $("status").textContent = `${pre}通勤后台计算中… ${stage}（已有通勤 ${s.commute_places} 条）`;
+      _pollTimer = setTimeout(tick, 2000);
     } else {
       await loadGames();
       $("status").textContent = (s.pending > 0)
@@ -364,7 +392,8 @@ function pollRefresh() {
     try { s = await api("/api/refresh/status"); }
     catch { _refreshTimer = setTimeout(tick, 2000); return; }
     if (s.refreshing) {
-      $("status").textContent = "刷新球局中…（后台重新拉取两平台）";
+      const p = s.progress;  // [已请求, 总请求]（闪动翻页后总数会变大）
+      $("status").textContent = `刷新球局中… 已拉取 ${p ? `${p[0]}/${p[1]}` : "0/?"} 页`;
       _refreshTimer = setTimeout(tick, 2000);
     } else {
       const r = s.result || {};

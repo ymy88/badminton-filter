@@ -96,4 +96,11 @@ function sortGames(games, by, mode) {
   return out;
 }
 
-if (typeof module !== "undefined") module.exports = { applyFilters, sortGames };
+// 下拉候选匹配：原文包含，或输入为字母数字时按全拼/首字母包含；py = [全拼, 首字母]（可缺）
+function pyMatch(text, q, py) {
+  if (!q || text.includes(q)) return true;
+  const l = q.toLowerCase();
+  return !!py && /^[a-z0-9]+$/.test(l) && (py[0].includes(l) || py[1].includes(l));
+}
+
+if (typeof module !== "undefined") module.exports = { applyFilters, sortGames, pyMatch };

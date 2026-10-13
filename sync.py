@@ -98,16 +98,17 @@ def _call(source, fn, *args):
         body = e.read().decode(errors="replace")
         return body, creds_mod.is_auth_failure(source, body, e.code)
 
-def _fetch_zhongyulian(cr, today):
+def _fetch_zhongyulian(cr, today, tick):
     games = []
     for day in range(3):  # 今天/明天/后天
         text, bad = _call("zhongyulian", zhongyulian.fetch, cr, day)
+        tick()
         if bad:
             return games, True
         games += zhongyulian.parse_games(text, day, today)
     return games, False
 
-def _fetch_flashx(cr, today):
+def _fetch_flashx(cr, today, tick):
     games = []
     for i in range(3):  # 今天/明天/后天
         d = (today + timedelta(days=i)).isoformat()
@@ -121,6 +122,7 @@ def _fetch_flashx(cr, today):
                 pages = int(json.loads(text)["result"]["pages"])
             except (ValueError, KeyError, TypeError):
                 pages = 0
+            tick(max(pages, 1) - 1 if page == 1 else 0)  # 首页才知道总页数，补进总数
             page += 1
     return games, False
 
@@ -148,13 +150,20 @@ def load_canonical_list(conn):
             for r in conn.execute("SELECT id, canonical_name, lat, lng, name_patterns,"
                                   " platform_ids, amap_id FROM canonical_venues")]
 
-def refresh(conn, creds, config):
+def refresh(conn, creds, config, progress=lambda *p: None):
     # 只做「抓取 + 入库」，秒级返回；通勤/POI 归类交给 compute_pending 后台跑
+    # progress(已请求, 总请求)：两平台各 3 天先按每天 1 页估，闪动拿到总页数后补
     today = date.today()
+    st = {"done": 0, "total": 6}
+    def tick(more=0):
+        st["done"] += 1
+        st["total"] += more
+        progress(st["done"], st["total"])
+    progress(0, st["total"])
     seed_canonical_venues(conn, config)
     games, auth_failed, errors = [], [], []
-    for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today)),
-                        ("flashx", lambda c: _fetch_flashx(c, today))):
+    for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today, tick)),
+                        ("flashx", lambda c: _fetch_flashx(c, today, tick))):
         if not creds.get(source):
             auth_failed.append(source)  # 没凭证 → 当作凭证失效，界面提示去「抓取凭证」
             continue
@@ -175,9 +184,10 @@ def _origins_ll(conn):
             for r in conn.execute("SELECT key,lat,lng FROM origins")
             if r["lat"] is not None and r["lng"] is not None}
 
-def compute_pending(db_path, config):
+def compute_pending(db_path, config, progress=lambda *p: None):
     # 后台线程用：自开连接。1) 给未归类/无坐标的球局补 规范馆+坐标+通勤；
     # 2) 给已归类但缺通勤的场馆补算（如刚换了出发地）。按场馆缓存，可重复调。
+    # progress(阶段, 已完成, 总数)：阶段 "venue" 逐条球局归类，"commute" 逐个场馆算通勤
     conn = db.connect(db_path)
     try:
         canonical = load_canonical_list(conn)
@@ -185,29 +195,31 @@ def compute_pending(db_path, config):
         pending = [dict(r) for r in conn.execute(
             "SELECT * FROM games WHERE canonical_id IS NULL OR lat IS NULL")]
         done = []
-        for g in pending:
+        for i, g in enumerate(pending, 1):
             try:
                 enrich_venue(conn, g, canonical, origins_ll)
                 done.append(g)
             except Exception:  # 单个场馆的高德/编码异常只跳过该场馆
                 pass
+            progress("venue", i, len(pending))
         if done:
             upsert_games(conn, done)  # 写回 enrich 补上的 canonical_id/坐标
-        _fill_missing_commute(conn, origins_ll)
+        _fill_missing_commute(conn, origins_ll, progress)
     finally:
         conn.close()
 
-def _fill_missing_commute(conn, origins_ll):
+def _fill_missing_commute(conn, origins_ll, progress):
     # 按场馆(place_key)去重，给所有有坐标的场馆补缺失的通勤（换出发地后缓存被清会重算）
     places = {}
     for r in conn.execute("SELECT canonical_id, venue_key, lat, lng FROM games WHERE lat IS NOT NULL"):
         pk = commute.place_key(r["canonical_id"], r["venue_key"])
         places.setdefault(pk, commute.amap_coord(r["lat"], r["lng"]))
-    for pk, dest in places.items():
+    for i, (pk, dest) in enumerate(places.items(), 1):
         try:
             _ensure_commute(conn, pk, dest, origins_ll)
         except Exception:
             pass
+        progress("commute", i, len(places))
 
 def pending_count(conn):
     # 还需补数据的场馆数：无坐标(POI/geocode 失败) + 有坐标但缺某出发地通勤

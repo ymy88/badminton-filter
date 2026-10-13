@@ -1,5 +1,6 @@
 # app.py
 import json, threading, webbrowser
+from pypinyin import Style, lazy_pinyin
 from flask import Flask, jsonify, request, send_from_directory
 import commute, creds, db, sync
 
@@ -10,7 +11,8 @@ def create_app(conn, config, db_path=None):
     compute_lock = threading.Lock()   # 保证同时只有一个后台通勤任务
     compute_rerun = threading.Event()  # 运行期间又被触发 → 跑完再补一轮
     refresh_lock = threading.Lock()   # 保证同时只有一个后台拉取任务
-    refresh_box = {"result": None}    # 最近一次拉取结果（供前端轮询取回）
+    refresh_box = {"result": None, "progress": None}  # 最近一次拉取结果/进度（供前端轮询取回）
+    compute_box = {"progress": None}  # 后台算通勤进度 (阶段, 已完成, 总数)
 
     @app.get("/")
     def index():
@@ -42,28 +44,33 @@ def create_app(conn, config, db_path=None):
     def get_config():
         names = [r["canonical_name"] for r in
                  conn.execute("SELECT canonical_name FROM canonical_venues ORDER BY id")]
-        rows = conn.execute("SELECT word,in_include,in_exclude FROM keywords ORDER BY rowid").fetchall()
-        kw = {"include": [r["word"] for r in rows if r["in_include"]],
-              "exclude": [r["word"] for r in rows if r["in_exclude"]]}
-        hist = [r["word"] for r in rows]  # 全部用过的词（永久历史，供下拉）
-        return jsonify({"keywords": kw, "kw_history": hist, "canonical_names": names})
+        hist = [r["word"] for r in conn.execute("SELECT word FROM kw_history ORDER BY rowid")]
+        row = conn.execute("SELECT data FROM filters WHERE id=1").fetchone()
+        return jsonify({"filters": json.loads(row["data"]) if row else None,
+                        "kw_history": hist, "canonical_names": names})
 
-    @app.post("/api/keywords")
-    def save_keywords():
+    @app.post("/api/filters")
+    def save_filters():
+        # 整份筛选条件(前端表单状态)存一行；其中关键字顺带记进永久历史
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"ok": False, "msg": "body 须为 JSON 对象"}), 400
-        inc = {s for s in (body.get("include") or []) if isinstance(s, str) and s}
-        exc = {s for s in (body.get("exclude") or []) if isinstance(s, str) and s}
-        for w in inc | exc:  # 新词建行（已存在忽略）——行永不删除 = 永久历史
-            conn.execute("INSERT OR IGNORE INTO keywords(word) VALUES(?)", (w,))
-        conn.execute("UPDATE keywords SET in_include=0, in_exclude=0")  # 重置后按当前选择置位
-        for w in inc:
-            conn.execute("UPDATE keywords SET in_include=1 WHERE word=?", (w,))
-        for w in exc:
-            conn.execute("UPDATE keywords SET in_exclude=1 WHERE word=?", (w,))
+        for k in ("kwInc", "kwExc"):
+            for w in body.get(k) or []:
+                if isinstance(w, str) and w:
+                    conn.execute("INSERT OR IGNORE INTO kw_history(word) VALUES(?)", (w,))
+        conn.execute("INSERT OR REPLACE INTO filters(id,data) VALUES(1,?)",
+                     (json.dumps(body, ensure_ascii=False),))
         conn.commit()
         return jsonify({"ok": True})
+
+    @app.post("/api/pinyin")
+    def pinyin():
+        # 文本 → [全拼, 首字母]（小写、无空格），供下拉框按拼音匹配
+        texts = (request.get_json(silent=True) or {}).get("texts") or []
+        return jsonify({t: ["".join(lazy_pinyin(t)).lower(),
+                            "".join(lazy_pinyin(t, style=Style.FIRST_LETTER)).lower()]
+                        for t in texts if isinstance(t, str)})
 
     @app.get("/api/origins")
     def get_origins():
@@ -109,7 +116,8 @@ def create_app(conn, config, db_path=None):
             try:
                 while True:
                     compute_rerun.clear()
-                    sync.compute_pending(db_path, config)
+                    compute_box["progress"] = None
+                    sync.compute_pending(db_path, config, progress=_setter(compute_box))
                     if not compute_rerun.is_set():
                         break  # 期间无新触发才收工
             finally:
@@ -119,18 +127,22 @@ def create_app(conn, config, db_path=None):
         threading.Thread(target=bg, daemon=True).start()
         return True
 
+    def _setter(box):
+        return lambda *p: box.__setitem__("progress", p)
+
     def _start_refresh():
         # 后台拉取入库，不阻塞请求（拉取 1333 场 + 解析较慢，同步会冻住单线程服务）
         if not db_path:  # 无 db_path(测试)：同步跑，用主连接
-            refresh_box["result"] = sync.refresh(conn, creds.load(), config)
+            refresh_box["result"] = sync.refresh(conn, creds.load(), config, progress=_setter(refresh_box))
             return False
         if not refresh_lock.acquire(blocking=False):
             return True  # 已在拉取
         def bg():
             try:
+                refresh_box["progress"] = None
                 c = db.connect(db_path)
                 try:
-                    refresh_box["result"] = sync.refresh(c, creds.load(), config)
+                    refresh_box["result"] = sync.refresh(c, creds.load(), config, progress=_setter(refresh_box))
                 finally:
                     c.close()
             finally:
@@ -146,7 +158,8 @@ def create_app(conn, config, db_path=None):
 
     @app.get("/api/refresh/status")
     def refresh_status():
-        return jsonify({"refreshing": refresh_lock.locked(), "result": refresh_box["result"]})
+        return jsonify({"refreshing": refresh_lock.locked(), "result": refresh_box["result"],
+                        "progress": refresh_box["progress"]})
 
     @app.post("/api/commute")
     def commute_recompute():
@@ -154,7 +167,7 @@ def create_app(conn, config, db_path=None):
 
     @app.get("/api/commute/status")
     def commute_status():
-        return jsonify({"computing": compute_lock.locked(),
+        return jsonify({"computing": compute_lock.locked(), "progress": compute_box["progress"],
                         "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"],
                         "pending": sync.pending_count(conn)})
 
