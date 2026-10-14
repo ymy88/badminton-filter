@@ -339,9 +339,10 @@ function pollCommute(baseMsg) {
       _pollTimer = setTimeout(tick, 2000);
     } else {
       await loadGames();
-      $("status").textContent = (s.pending > 0)
-        ? `${pre}还有 ${s.pending} 个场馆通勤没算出（可能高德繁忙），再点「算通勤」重试`
-        : `${pre}通勤已算完（${s.commute_places}）`;
+      $("status").textContent = ((s.pending > 0)
+        ? `${pre}还有 ${s.pending} 个场馆通勤没算出（高德接口出错），再点「算通勤」重试`
+        : `${pre}通勤已算完（${s.commute_places}）`)
+        + (s.unmatched > 0 ? `；${s.unmatched} 个场馆高德没自动搜到，去「球馆管理」处理` : "");
       $("commuteBtn").disabled = false;  // 通勤算完才放开按钮
     }
   };

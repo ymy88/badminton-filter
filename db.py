@@ -28,7 +28,9 @@ def init_schema(conn):
       platform_name_norm TEXT PRIMARY KEY,
       canonical_id INTEGER REFERENCES canonical_venues(id),
       origin TEXT NOT NULL CHECK(origin IN ('pending','auto','confirmed','manual','none')),
-      updated_at TEXT);
+      updated_at TEXT,
+      -- pending 的上次自动搜索结果：NULL 未搜过 / error 高德接口出错(会重试) / empty 没搜到 / dup 与已有统一球场重名
+      last_search TEXT CHECK(last_search IN ('error','empty','dup')));
     CREATE TABLE IF NOT EXISTS commute(
       origin TEXT, place_key TEXT, drive_min INTEGER, transit_min INTEGER,
       walk_m INTEGER, computed_at TEXT, PRIMARY KEY(origin, place_key));

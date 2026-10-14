@@ -22,7 +22,7 @@ def test_games_endpoint_joins_alias_for_amap_name_and_commute():
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(4,'徐家汇体育公园','B1',31.18,121.43)")
     conn.execute("INSERT INTO games(source,source_id,date,venue_key,platform_name_norm) VALUES('zhongyulian','1','2999-01-01','zhongyulian:9','万体汇')")
-    conn.execute("INSERT INTO venue_aliases VALUES('万体汇',4,'manual',NULL)")
+    conn.execute("INSERT INTO venue_aliases(platform_name_norm,canonical_id,origin,updated_at) VALUES('万体汇',4,'manual',NULL)")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','c:4',12,30,800)")
     conn.commit()
     g = appmod.create_app(conn, {}).test_client().get("/api/games").get_json()["games"][0]
@@ -275,12 +275,15 @@ def test_amap_search(monkeypatch):
     assert c.get("/api/amap/search?q= 堂颂 ").get_json() == {"pois": [{"amap_id": "B1"}]}
     assert seen == {"q": "堂颂", "limit": 10}
     assert c.get("/api/amap/search?q=").status_code == 400
+    monkeypatch.setattr(commute, "poi_search", lambda q, limit=1: (_ for _ in ()).throw(commute.AmapError("高德接口出错")))
+    r = c.get("/api/amap/search?q=x")
+    assert r.status_code == 502 and r.get_json()["msg"] == "高德接口出错"
 
 def test_games_zyl_unclassified_has_no_commute_even_with_stale_cache():
     # 中羽联坐标不可信：未归到统一球场的中羽联球局通勤一律未知（旧地理编码留下的 v: 缓存也不用）
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO games(source,source_id,date,venue_key,platform_name_norm) VALUES('zhongyulian','1','2999-01-01','zhongyulian:9','野馆')")
-    conn.execute("INSERT INTO venue_aliases VALUES('野馆',NULL,'none',NULL)")
+    conn.execute("INSERT INTO venue_aliases(platform_name_norm,canonical_id,origin,updated_at) VALUES('野馆',NULL,'none',NULL)")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:zhongyulian:9',15,30,900)")
     conn.commit()
     g = appmod.create_app(conn, {}).test_client().get("/api/games").get_json()["games"][0]

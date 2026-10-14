@@ -88,11 +88,12 @@ lat, lng   平台原始坐标          origin                           amap_id 
 | `platform_name_norm` | 主键。平台馆名经 `venues.norm_name` 规范化后的结果 |
 | `canonical_id` | 归到哪个统一球场；`pending`、`none` 时为空 |
 | `origin` | 这条对应关系的来源，见下表 |
-| `updated_at` | 最后修改时间；`pending` 行用它显示「上次搜索失败于何时」 |
+| `updated_at` | 最后修改时间；`pending` 行用它显示「上次高德接口出错于何时」 |
+| `last_search` | `pending` 行上次自动搜索的结果：空 = 还没搜过；`error` = 高德接口出错（网络、限流、key 等），下次「算通勤」重试；`empty` = 高德正常返回但没结果；`dup` = 搜到的球场与已有统一球场重名。`empty`/`dup` 不再自动搜，留在「待处理」由用户手动处理 |
 
 | `origin` | 含义 | `canonical_id` | 自动归类的处理 |
 |---|---|---|---|
-| `pending` | 待归类：还没搜过，或搜高德失败 | 空 | 每次「算通勤」重试 |
+| `pending` | 待归类：还没搜过，或自动搜索没归上（原因见 `last_search`） | 空 | 只重试没搜过的和 `error` |
 | `auto` | 自动搜高德归的 | 有 | 不再处理 |
 | `confirmed` | 自动归的，用户确认无误 | 有 | 不碰 |
 | `manual` | 用户手动指定 | 有 | 不碰 |
@@ -126,11 +127,12 @@ lat, lng   平台原始坐标          origin                           amap_id 
 
 ### 3.2 算通勤（`sync.compute_pending`）
 
-1. **归类**：取 `venue_aliases` 中所有 `origin = pending` 且当前 `games` 里有球局的馆名，逐个处理（按馆名，不按球局）：
+1. **归类**：取 `venue_aliases` 中 `origin = pending`、`last_search` 为空或 `error`，且当前 `games` 里有球局的馆名，逐个处理（按馆名，不按球局）：
    - 用该馆名下任一原样 `venue_name` 搜高德 POI，取第一条结果。
    - POI 的 `amap_id` 已存在于 `canonical_venues` → 归到该统一球场；否则新建统一球场。
    - 更新该行为 `origin = auto`、填 `canonical_id`。
-   - 搜不到、请求失败，或新建统一球场时 `amap_name` 重名（唯一约束冲突）→ 保持 `pending`，只更新 `updated_at`。重名的会一直留在「待处理」里，由用户手动处理。
+   - 没归上 → 保持 `pending`，`last_search` 记 `error`（`poi_search` 抛 `AmapError`）、`empty`（返回空列表）或 `dup`（新建统一球场时 `amap_name` 唯一约束冲突），并更新 `updated_at`。
+   - 高德返回每秒请求数超限（infocode 10021）时，`_amap_get` 等 1 秒重试，最多 3 次。
    - 进度文字：「归类场馆 i/n」，n 为待归类馆名数。
 2. **算通勤**：需要通勤的场馆有两类：
    - 当前球局引用到的统一球场：坐标用统一球场的高德坐标，缓存键 `c:<id>`。（修正现有问题：现在用的是「第一场球局的坐标」，可能是闪动坐标。）
@@ -144,7 +146,11 @@ lat, lng   平台原始坐标          origin                           amap_id 
 
 ### 3.4 `pending_count`（主页「还有 N 个场馆没算出」）
 
-= 当前球局涉及的 `pending` 馆名数 + 通勤三项未算齐的场馆数（场馆定义同 3.2 第 2 步）。
+= 当前球局涉及的、还会自动重试的 `pending` 馆名数（`last_search` 为空或 `error`）+ 通勤三项未算齐的场馆数（场馆定义同 3.2 第 2 步）。
+
+另有 `unmatched_count` = 当前球局涉及的 `last_search` 为 `empty`/`dup` 的馆名数，主页提示「N 个场馆高德没自动搜到，去「球馆管理」处理」。
+
+公交规划接口正常返回但没有方案（多为距离太近）时，公交时间按步行时间算；只有接口出错才留空、下次重试。
 
 ### 3.5 删除的代码
 

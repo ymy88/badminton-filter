@@ -25,15 +25,25 @@ def sec_to_min(sec):
     except (ValueError, TypeError):
         return None
 
+class AmapError(Exception):
+    """高德接口出错（网络/限流/key 等），区别于正常返回但没有结果"""
+
 def _amap_get(url, params):
+    # 出错返回 None；每秒请求数超限（infocode 10021）等 1 秒重试，最多 3 次
     params = {**params, "key": _key()}
     q = urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(f"{url}?{q}", timeout=10) as r:
-            data = json.loads(r.read().decode())
-        return data if data.get("status") == "1" else None
-    except Exception:
-        return None
+    for _ in range(3):
+        try:
+            with urllib.request.urlopen(f"{url}?{q}", timeout=10) as r:
+                data = json.loads(r.read().decode())
+        except Exception:
+            return None
+        if data.get("status") == "1":
+            return data
+        if data.get("infocode") != "10021":
+            return None
+        time.sleep(1)
+    return None
 
 def geocode(address):
     d = _amap_get(f"{BASE}/v3/geocode/geo", {"address": address, "city": CITY})
@@ -47,11 +57,13 @@ def geocode(address):
 
 def poi_search(name, limit=1):
     # 按名字搜高德 POI，返回前 limit 条：名称 + POI id（跨平台去重键）+ 坐标 + 所在区 + 地址；
-    # 搜不到/出错返回 []。高德空字段返回 [] 而非 ""，统一成空串
+    # 搜不到返回 []，接口出错抛 AmapError。高德空字段返回 [] 而非 ""，统一成空串
     d = _amap_get(f"{BASE}/v3/place/text",
                   {"keywords": name, "city": CITY, "citylimit": "true", "offset": limit})
+    if d is None:
+        raise AmapError("高德接口出错")
     out = []
-    for p in (d or {}).get("pois") or []:
+    for p in d.get("pois") or []:
         try:
             lng, lat = p["location"].split(",")
             out.append({"amap_id": p["id"], "name": p["name"], "lat": float(lat), "lng": float(lng),
@@ -88,6 +100,8 @@ def route_minutes(origin_ll, dest_ll):
                      {"origin": origin_ll, "destination": dest_ll})
     dm = _duration_min(drive, "paths")
     tm = _duration_min(transit, "transits")
+    if tm is None and transit is not None:  # 接口正常但没有公交方案（多为距离太近）：按步行时间算
+        tm = _duration_min(walk, "paths")
     wm = _walk_meters(walk)
     time.sleep(0.3)  # 节流，避开 QPS
     return {"drive_min": dm, "transit_min": tm, "walk_m": wm}

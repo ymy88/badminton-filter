@@ -31,28 +31,35 @@ def canonical_for_poi(conn, poi):
     return conn.execute("INSERT INTO canonical_venues(amap_name, amap_id, lat, lng) VALUES(?,?,?,?)",
                         (poi["name"], poi["amap_id"], poi["lat"], poi["lng"])).lastrowid
 
+# 待自动搜索的馆名：pending 且未搜过或上次高德接口出错
+_RETRYABLE = "a.origin = 'pending' AND (a.last_search IS NULL OR a.last_search = 'error')"
+
 def classify_pending(conn, progress=lambda msg: None):
     # 当前球局涉及的 pending 馆名逐个搜高德 POI（按馆名，不按球局），取第一条。
-    # 搜不到/重名 → 保持 pending，只记 updated_at，下次重试。
+    # 只搜未搜过的和上次接口出错的；结果记进 last_search：
+    # error 接口出错（下次重试）/ empty 没搜到、dup 与已有统一球场重名（都不再自动搜，留给管理页手动处理）
     # UPDATE 都带 origin='pending'：搜索期间用户若在管理页改过，不覆盖
     names = conn.execute(
         "SELECT a.platform_name_norm n, MIN(g.venue_name) raw FROM venue_aliases a"
         " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
-        " WHERE a.origin = 'pending' GROUP BY a.platform_name_norm").fetchall()
+        f" WHERE {_RETRYABLE} GROUP BY a.platform_name_norm").fetchall()
     for i, r in enumerate(names, 1):
-        pois = commute.poi_search(r["raw"])
-        cid = None
+        cid, result = None, "empty"
+        try:
+            pois = commute.poi_search(r["raw"])
+        except commute.AmapError:
+            pois, result = [], "error"
         if pois:
             try:
                 cid = canonical_for_poi(conn, pois[0])
             except sqlite3.IntegrityError:  # 高德名与已有统一球场重名：留给用户手动处理
-                pass
+                result = "dup"
         if cid:
-            conn.execute("UPDATE venue_aliases SET canonical_id=?, origin='auto', updated_at=datetime('now')"
-                         " WHERE platform_name_norm=? AND origin='pending'", (cid, r["n"]))
+            conn.execute("UPDATE venue_aliases SET canonical_id=?, origin='auto', last_search=NULL,"
+                         " updated_at=datetime('now') WHERE platform_name_norm=? AND origin='pending'", (cid, r["n"]))
         else:
-            conn.execute("UPDATE venue_aliases SET updated_at=datetime('now')"
-                         " WHERE platform_name_norm=? AND origin='pending'", (r["n"],))
+            conn.execute("UPDATE venue_aliases SET last_search=?, updated_at=datetime('now')"
+                         " WHERE platform_name_norm=? AND origin='pending'", (result, r["n"]))
         conn.commit()
         progress(f"归类场馆 {i}/{len(names)}")
 
@@ -176,13 +183,13 @@ def compute_pending(db_path, config, progress=lambda msg: None):
         conn.close()
 
 def pending_count(conn):
-    # 还需处理的场馆数：当前球局涉及的 pending 馆名 + 通勤三项未算齐的场馆；用于提示用户重试
+    # 还能靠重试补上的场馆数：当前球局涉及的待自动搜索馆名 + 通勤三项未算齐的场馆；用于提示用户重试
     origins = [r["key"] for r in conn.execute("SELECT key FROM origins WHERE lat IS NOT NULL")]
     if not origins:
         return 0
     n = conn.execute("SELECT COUNT(DISTINCT a.platform_name_norm) c FROM venue_aliases a"
                      " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
-                     " WHERE a.origin = 'pending'").fetchone()["c"]
+                     f" WHERE {_RETRYABLE}").fetchone()["c"]
     for pk in commute_places(conn):
         complete = conn.execute(
             "SELECT COUNT(*) c FROM commute WHERE place_key=? AND drive_min IS NOT NULL"
@@ -190,6 +197,12 @@ def pending_count(conn):
         if complete < len(origins):
             n += 1
     return n
+
+def unmatched_count(conn):
+    # 高德自动搜不到（没搜到/重名）、要去管理页手动处理的馆名数（只算还有球局的）
+    return conn.execute("SELECT COUNT(DISTINCT a.platform_name_norm) c FROM venue_aliases a"
+                        " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
+                        " WHERE a.origin = 'pending' AND a.last_search IN ('empty','dup')").fetchone()["c"]
 
 def venue_rows(conn):
     # 球馆管理页数据：每个馆名一行，附平台馆名示例、来源、球局数、统一球场、可疑原因、是否已有通勤
@@ -217,7 +230,7 @@ def venue_rows(conn):
             suspect = venues.suspect_reasons(name, canon["amap_name"], fx_ll, (canon["lat"], canon["lng"]))
         out.append({"platform_name_norm": a["platform_name_norm"], "name": name,
                     "sources": sorted(s["sources"]) if s else [], "game_count": s["count"] if s else 0,
-                    "origin": a["origin"], "updated_at": a["updated_at"], "canonical": canon,
+                    "origin": a["origin"], "last_search": a["last_search"], "updated_at": a["updated_at"], "canonical": canon,
                     "suspect": suspect,
                     "has_commute": bool(canon) and commute.place_key(canon["id"], None) in with_commute})
     out.sort(key=lambda v: -v["game_count"])

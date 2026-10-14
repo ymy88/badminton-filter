@@ -65,8 +65,25 @@ def test_poi_search_parses(monkeypatch):
 def test_poi_search_empty(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get", lambda url, params: {"status": "1", "pois": []})
     assert commute.poi_search("不存在") == []
-    monkeypatch.setattr(commute, "_amap_get", lambda url, params: None)  # 请求失败
-    assert commute.poi_search("不存在") == []
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: None)  # 接口出错 ≠ 没搜到
+    import pytest
+    with pytest.raises(commute.AmapError):
+        commute.poi_search("不存在")
+
+def test_amap_get_retries_on_qps_limit(monkeypatch):
+    # 每秒请求数超限（10021）→ 等 1 秒重试；其他错误不重试
+    import io, json
+    replies = [{"status": "0", "infocode": "10021"}, {"status": "1", "pois": []}]
+    calls = []
+    def urlopen(url, timeout):
+        calls.append(url)
+        return io.BytesIO(json.dumps(replies.pop(0)).encode())
+    monkeypatch.setenv("GAO_DE_MAP_API_KEY", "k")
+    monkeypatch.setattr(commute.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(commute.time, "sleep", lambda s: None)
+    assert commute._amap_get("u", {}) == {"status": "1", "pois": []} and len(calls) == 2
+    replies[:] = [{"status": "0", "infocode": "10001"}]  # key 无效：不重试
+    assert commute._amap_get("u", {}) is None and len(calls) == 3
 
 def test_route_minutes_transit_gets_departure_time(monkeypatch):
     # 公交必须带出发时间 date/time，否则午夜按停运算（返回空/超长）
@@ -78,3 +95,17 @@ def test_route_minutes_transit_gets_departure_time(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get", fake)
     commute.route_minutes("121,31", "121.5,31.2")
     assert seen.get("time") == commute.DEPART_TIME and "date" in seen
+
+def test_route_minutes_no_transit_plan_uses_walk_time(monkeypatch):
+    # 公交接口正常但 transits 为空（距离太近）→ 公交时间按步行时间；公交接口出错则仍是 None（下次重试）
+    def fake(url, params):
+        if "transit" in url:
+            return {"status": "1", "count": "0", "route": {"transits": []}}
+        if "walking" in url:
+            return {"status": "1", "route": {"paths": [{"distance": "454", "duration": "360"}]}}
+        return {"status": "1", "route": {"paths": [{"duration": "360"}]}}
+    monkeypatch.setattr(commute, "_amap_get", fake)
+    monkeypatch.setattr(commute.time, "sleep", lambda s: None)
+    assert commute.route_minutes("121,31", "121.5,31.2")["transit_min"] == 6
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: None if "transit" in url else fake(url, params))
+    assert commute.route_minutes("121,31", "121.5,31.2")["transit_min"] is None

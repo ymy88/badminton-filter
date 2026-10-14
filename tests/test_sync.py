@@ -94,7 +94,7 @@ def test_upsert_records_norm_and_pending_alias():
 def test_upsert_keeps_existing_alias_and_overwrites_coords():
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(5,'馆','B5',30.0,120.0)")
-    conn.execute("INSERT INTO venue_aliases VALUES('馆',5,'manual','2026-01-01')")
+    conn.execute("INSERT INTO venue_aliases(platform_name_norm,canonical_id,origin,updated_at) VALUES('馆',5,'manual','2026-01-01')")
     sync.upsert_games(conn, [_g(lat=31.1, lng=121.5)])
     sync.upsert_games(conn, [_g(lat=31.2, lng=121.6)])  # 再刷新：平台坐标变了 → 用新值
     assert dict(_alias(conn, "馆"))["origin"] == "manual"
@@ -112,13 +112,29 @@ def test_classify_pending_found_creates_auto_and_searches_once_per_name(monkeypa
     assert conn.execute("SELECT amap_name FROM canonical_venues WHERE id=?", (a["canonical_id"],)).fetchone()[0] == "徐家汇体育公园"
     assert len(calls) == 1 and prog == ["归类场馆 1/1"]
 
-def test_classify_pending_miss_stays_pending(monkeypatch):
+def test_classify_pending_miss_marks_empty_and_not_retried(monkeypatch):
+    # 高德正常返回但没结果 → last_search=empty，不再自动搜（留给管理页手动处理）
     conn = db.connect(":memory:"); db.init_schema(conn)
     sync.upsert_games(conn, [_g()])
     monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [])
     sync.classify_pending(conn)
     a = _alias(conn, "馆")
-    assert a["origin"] == "pending" and a["canonical_id"] is None and a["updated_at"] is not None  # 记下搜过
+    assert a["origin"] == "pending" and a["canonical_id"] is None and a["last_search"] == "empty"
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: (_ for _ in ()).throw(AssertionError("不该再搜")))
+    sync.classify_pending(conn)
+
+def test_classify_pending_amap_error_marks_error_and_retries(monkeypatch):
+    # 高德接口出错 → last_search=error，下次重试；成功后清掉
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    sync.upsert_games(conn, [_g()])
+    monkeypatch.setattr(sync.commute, "poi_search",
+                        lambda n, limit=1: (_ for _ in ()).throw(sync.commute.AmapError("x")))
+    sync.classify_pending(conn)
+    assert _alias(conn, "馆")["last_search"] == "error"
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [POI])
+    sync.classify_pending(conn)
+    a = _alias(conn, "馆")
+    assert a["origin"] == "auto" and a["last_search"] is None
 
 def test_classify_reuses_existing_amap_id(monkeypatch):
     conn = db.connect(":memory:"); db.init_schema(conn)
@@ -156,7 +172,8 @@ def test_classify_duplicate_amap_name_stays_pending(monkeypatch):
     sync.upsert_games(conn, [_g()])
     monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [POI])
     sync.classify_pending(conn)
-    assert _alias(conn, "馆")["origin"] == "pending"
+    a = _alias(conn, "馆")
+    assert a["origin"] == "pending" and a["last_search"] == "dup"
 
 def test_commute_places_uses_amap_coords_flashx_fallback_skips_zyl():
     conn = db.connect(":memory:"); db.init_schema(conn)
@@ -191,4 +208,9 @@ def test_pending_count_counts_pending_names_and_missing_commute():
     conn.execute("UPDATE venue_aliases SET origin='none' WHERE platform_name_norm IN ('缺通勤','齐全')")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:flashx:3',10,20,500)")
     assert sync.pending_count(conn) == 2  # 未归类 + 缺通勤；齐全不计
+    # 高德没搜到/重名的不靠重试，不计入待重试，计入 unmatched；接口出错的照样计入待重试
+    conn.execute("UPDATE venue_aliases SET last_search='empty' WHERE platform_name_norm='未归类'")
+    assert sync.pending_count(conn) == 1 and sync.unmatched_count(conn) == 1
+    conn.execute("UPDATE venue_aliases SET last_search='error' WHERE platform_name_norm='未归类'")
+    assert sync.pending_count(conn) == 2 and sync.unmatched_count(conn) == 0
 

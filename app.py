@@ -89,7 +89,10 @@ def create_app(conn, config, db_path=None):
         q = (request.args.get("q") or "").strip()
         if not q:
             return jsonify({"ok": False, "msg": "缺少关键字 q"}), 400
-        return jsonify({"pois": commute.poi_search(q, limit=10)})
+        try:
+            return jsonify({"pois": commute.poi_search(q, limit=10)})
+        except commute.AmapError as e:
+            return jsonify({"ok": False, "msg": str(e)}), 502
 
     def _alias_req():
         # 管理页写接口的公共校验：body 须含 platform_name_norm，且该馆名存在
@@ -103,7 +106,7 @@ def create_app(conn, config, db_path=None):
         return body, row, None
 
     def _set_alias(norm, origin, cid, touched="datetime('now')"):
-        conn.execute(f"UPDATE venue_aliases SET origin=?, canonical_id=?, updated_at={touched}"
+        conn.execute(f"UPDATE venue_aliases SET origin=?, canonical_id=?, last_search=NULL, updated_at={touched}"
                      " WHERE platform_name_norm=?", (origin, cid, norm))
         conn.commit()
 
@@ -265,7 +268,7 @@ def create_app(conn, config, db_path=None):
     def commute_status():
         return jsonify({"computing": compute_lock.locked(), "progress": compute_box["progress"],
                         "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"],
-                        "pending": sync.pending_count(conn)})
+                        "pending": sync.pending_count(conn), "unmatched": sync.unmatched_count(conn)})
 
     @app.post("/api/creds/capture")
     def capture():
