@@ -186,3 +186,88 @@ def test_capture_reports_returned_platforms(monkeypatch):
     monkeypatch.setattr(creds, "capture", lambda: {"flashx": {"t": 1}})
     r = appmod.create_app(conn, {}).test_client().post("/api/creds/capture").get_json()
     assert r == {"flashx": True}
+
+# ---- 球馆管理接口 ----
+
+def _venue_app(monkeypatch=None):
+    # 两个馆名：「堂颂羽毛球馆(淞南店)」自动归到大华店(分店不同 → 可疑)；「野馆」pending
+    import sync
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(1,'堂颂羽毛球馆(大华店)','B1',31.2904,121.4119)")
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(2,'万体汇','B2',31.18,121.44)")
+    g = dict(title="t", date="2999-01-01", start_time="19:00", end_time="21:00", duration_min=120,
+             price=30.0, applied_num=0, total_num=12, raw_text="t", tags="[]", organizer="o", club_name="c", detail_ref="1")
+    sync.upsert_games(conn, [
+        dict(g, source="flashx", source_id="1", venue_name="堂颂羽毛球馆(淞南店)", venue_key="flashx:1", lat=31.3422, lng=121.4119),
+        dict(g, source="zhongyulian", source_id="2", venue_name="堂颂羽毛球馆（淞南店）", venue_key="zhongyulian:2", lat=None, lng=None),
+        dict(g, source="zhongyulian", source_id="3", venue_name="野馆", venue_key="zhongyulian:3", lat=None, lng=None)])
+    conn.execute("UPDATE venue_aliases SET origin='auto', canonical_id=1 WHERE platform_name_norm='堂颂羽毛球馆(淞南店)'")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','c:2',10,20,500)")
+    conn.commit()
+    return conn, appmod.create_app(conn, {}).test_client()
+
+def _row(client, norm):
+    return next(v for v in client.get("/api/venues").get_json()["venues"] if v["platform_name_norm"] == norm)
+
+def test_venues_list_rows_and_suspect():
+    conn, c = _venue_app()
+    v = _row(c, "堂颂羽毛球馆(淞南店)")
+    assert v["game_count"] == 2 and v["sources"] == ["flashx", "zhongyulian"]
+    assert v["origin"] == "auto" and v["canonical"]["amap_name"] == "堂颂羽毛球馆(大华店)"
+    assert v["suspect"][0] == "分店不同" and v["suspect"][1].startswith("闪动坐标相距")
+    assert v["has_commute"] is False
+    p = _row(c, "野馆")
+    assert p["origin"] == "pending" and p["canonical"] is None and p["suspect"] == []
+
+def test_assign_existing_canonical_sets_manual():
+    conn, c = _venue_app()
+    r = c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "canonical_id": 2}).get_json()
+    assert r == {"ok": True, "canonical_id": 2, "has_commute": True}
+    v = _row(c, "野馆")
+    assert v["origin"] == "manual" and v["canonical"]["id"] == 2
+    # 主页立即生效
+    g = [x for x in c.get("/api/games").get_json()["games"] if x["venue_name"] == "野馆"][0]
+    assert g["amap_name"] == "万体汇" and g["commute"]["home"]["drive_min"] == 10
+
+def test_assign_new_poi_creates_canonical_and_reuses_amap_id():
+    conn, c = _venue_app()
+    poi = {"amap_id": "B9", "name": "堂颂羽毛球馆(淞南店)", "lat": 31.34, "lng": 121.41}
+    r = c.post("/api/venues/assign", json={"platform_name_norm": "堂颂羽毛球馆(淞南店)", "poi": poi}).get_json()
+    assert r["ok"] and r["has_commute"] is False
+    new_id = r["canonical_id"]
+    r2 = c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "poi": poi}).get_json()
+    assert r2["canonical_id"] == new_id  # 同 amap_id 复用
+    assert conn.execute("SELECT COUNT(*) FROM canonical_venues").fetchone()[0] == 3
+
+def test_assign_errors():
+    conn, c = _venue_app()
+    assert c.post("/api/venues/assign", json={"platform_name_norm": "野馆"}).status_code == 400
+    assert c.post("/api/venues/assign", json=["x"]).status_code == 400
+    assert c.post("/api/venues/assign", json={"platform_name_norm": "没有", "canonical_id": 2}).status_code == 404
+    assert c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "canonical_id": 99}).status_code == 404
+    bad = {"amap_id": "B9", "name": "万体汇", "lat": 31.0, "lng": 121.0}  # 与已有统一球场同名不同 id
+    r = c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "poi": bad})
+    assert r.status_code == 409 and _row(c, "野馆")["origin"] == "pending"
+    assert c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "poi": dict(bad, lat="x")}).status_code == 400
+
+def test_confirm_none_reset():
+    conn, c = _venue_app()
+    assert c.post("/api/venues/confirm", json={"platform_name_norm": "野馆"}).status_code == 409  # 只能确认 auto
+    assert c.post("/api/venues/confirm", json={"platform_name_norm": "堂颂羽毛球馆(淞南店)"}).get_json()["ok"]
+    v = _row(c, "堂颂羽毛球馆(淞南店)")
+    assert v["origin"] == "confirmed" and v["canonical"]["id"] == 1 and v["suspect"] == []  # 确认后不再判可疑
+    c.post("/api/venues/none", json={"platform_name_norm": "野馆"})
+    assert _row(c, "野馆")["origin"] == "none"
+    c.post("/api/venues/reset", json={"platform_name_norm": "堂颂羽毛球馆(淞南店)"})
+    v = _row(c, "堂颂羽毛球馆(淞南店)")
+    assert v["origin"] == "pending" and v["canonical"] is None and v["updated_at"] is None
+    assert c.post("/api/venues/none", json={"platform_name_norm": "没有"}).status_code == 404
+
+def test_amap_search(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(commute, "poi_search", lambda q, limit=1: seen.update(q=q, limit=limit) or [{"amap_id": "B1"}])
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    c = appmod.create_app(conn, {}).test_client()
+    assert c.get("/api/amap/search?q= 堂颂 ").get_json() == {"pois": [{"amap_id": "B1"}]}
+    assert seen == {"q": "堂颂", "limit": 10}
+    assert c.get("/api/amap/search?q=").status_code == 400

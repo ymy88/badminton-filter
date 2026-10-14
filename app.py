@@ -1,5 +1,5 @@
 # app.py
-import json, threading, time, webbrowser
+import json, sqlite3, threading, time, webbrowser
 from pypinyin import Style, lazy_pinyin
 from flask import Flask, jsonify, request, send_from_directory
 import commute, creds, db, sync
@@ -71,6 +71,84 @@ def create_app(conn, config, db_path=None):
         return jsonify({t: ["".join(lazy_pinyin(t)).lower(),
                             "".join(lazy_pinyin(t, style=Style.FIRST_LETTER)).lower()]
                         for t in texts if isinstance(t, str)})
+
+    @app.get("/api/venues")
+    def venues_list():
+        return jsonify({"venues": sync.venue_rows(conn)})
+
+    @app.get("/api/amap/search")
+    def amap_search():  # 管理页「在高德搜索」：前 10 个 POI
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"ok": False, "msg": "缺少关键字 q"}), 400
+        return jsonify({"pois": commute.poi_search(q, limit=10)})
+
+    def _alias_req():
+        # 管理页写接口的公共校验：body 须含 platform_name_norm，且该馆名存在
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get("platform_name_norm"), str):
+            return None, None, (jsonify({"ok": False, "msg": "body 须为含 platform_name_norm 的 JSON 对象"}), 400)
+        row = conn.execute("SELECT * FROM venue_aliases WHERE platform_name_norm=?",
+                           (body["platform_name_norm"],)).fetchone()
+        if not row:
+            return body, None, (jsonify({"ok": False, "msg": "没有这个馆名"}), 404)
+        return body, row, None
+
+    def _set_alias(norm, origin, cid, touched="datetime('now')"):
+        conn.execute(f"UPDATE venue_aliases SET origin=?, canonical_id=?, updated_at={touched}"
+                     " WHERE platform_name_norm=?", (origin, cid, norm))
+        conn.commit()
+
+    def _is_num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    @app.post("/api/venues/assign")
+    def venues_assign():
+        # 手动指定：已有统一球场(canonical_id) 或 高德 POI(poi，amap_id 已有则复用)
+        body, row, err = _alias_req()
+        if err:
+            return err
+        cid, poi = body.get("canonical_id"), body.get("poi")
+        if isinstance(cid, int) and not isinstance(cid, bool):
+            if not conn.execute("SELECT 1 FROM canonical_venues WHERE id=?", (cid,)).fetchone():
+                return jsonify({"ok": False, "msg": "没有这个统一球场"}), 404
+        elif (isinstance(poi, dict) and isinstance(poi.get("amap_id"), str) and isinstance(poi.get("name"), str)
+              and _is_num(poi.get("lat")) and _is_num(poi.get("lng"))):
+            try:
+                cid = sync.canonical_for_poi(conn, poi)
+            except sqlite3.IntegrityError:
+                return jsonify({"ok": False, "msg": f"高德名「{poi['name']}」与已有统一球场重名"}), 409
+        else:
+            return jsonify({"ok": False, "msg": "需要 canonical_id 或 poi{amap_id,name,lat,lng}"}), 400
+        _set_alias(row["platform_name_norm"], "manual", cid)
+        has = conn.execute("SELECT 1 FROM commute WHERE place_key=?", (commute.place_key(cid, None),)).fetchone()
+        return jsonify({"ok": True, "canonical_id": cid, "has_commute": bool(has)})
+
+    @app.post("/api/venues/confirm")
+    def venues_confirm():  # 自动归类确认无误
+        body, row, err = _alias_req()
+        if err:
+            return err
+        if row["origin"] != "auto":
+            return jsonify({"ok": False, "msg": "只有自动归类可以确认"}), 409
+        _set_alias(row["platform_name_norm"], "confirmed", row["canonical_id"])
+        return jsonify({"ok": True})
+
+    @app.post("/api/venues/none")
+    def venues_none():  # 高德搜不到：通勤保持未知，不再自动重试
+        body, row, err = _alias_req()
+        if err:
+            return err
+        _set_alias(row["platform_name_norm"], "none", None)
+        return jsonify({"ok": True})
+
+    @app.post("/api/venues/reset")
+    def venues_reset():  # 恢复自动：改回 pending（未搜索），下次「算通勤」重新归类
+        body, row, err = _alias_req()
+        if err:
+            return err
+        _set_alias(row["platform_name_norm"], "pending", None, touched="NULL")
+        return jsonify({"ok": True})
 
     @app.get("/api/origins")
     def get_origins():
