@@ -79,11 +79,11 @@ const isTodo = (v) => (v.origin === "pending" && v.game_count > 0) || v.suspect.
 
 function status(v) {
   if (v.origin === "pending")
-    return `<span class="st pending">未归类</span><span class="why">${!v.game_count ? "已无球局，不再自动搜索" : {
-      error: `高德接口出错（${esc(localTime(v.updated_at))}），下次「算通勤」自动重试`,
-      empty: "高德按平台馆名没搜到，请修改关键字搜索或标记搜不到",
-      dup: "高德搜到的球场与已有统一球场重名，请手动选择",
-    }[v.last_search] || "还没搜索（点主页「算通勤」）"}</span>`;
+    return `<span class="st pending">未归类</span><span class="why">${!v.game_count ? "已无球局，不再自动搜索"
+      : v.last_search === "error" ? `高德接口出错（${esc(localTime(v.updated_at))}），下次「算通勤」自动重试`
+      : v.last_search === "empty" ? "高德按平台馆名没搜到，请修改关键字搜索或标记搜不到"
+      : v.last_search === "dup" ? "高德搜到的球场与已有统一球场重名，请手动选择"
+      : "还没搜索（点主页「算通勤」）"}</span>`;
   if (v.origin === "auto" && v.suspect.length)
     return `<span class="st suspect">自动·可疑</span>${v.suspect.map((s) => `<span class="why">${esc(s)}</span>`).join("")}`;
   const label = { auto: "自动", confirmed: "已确认", manual: "手动", none: "高德搜不到" }[v.origin];
