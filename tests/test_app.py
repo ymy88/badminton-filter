@@ -218,6 +218,9 @@ def test_venues_list_rows_and_suspect():
     assert v["has_commute"] is False
     p = _row(c, "野馆")
     assert p["origin"] == "pending" and p["canonical"] is None and p["suspect"] == []
+    # 全部统一球场（含未被引用的「万体汇」）供编辑区选择
+    assert {x["amap_name"] for x in c.get("/api/venues").get_json()["canonicals"]} == {"堂颂羽毛球馆(大华店)", "万体汇"}
+    assert c.get("/venues").status_code == 200
 
 def test_assign_existing_canonical_sets_manual():
     conn, c = _venue_app()

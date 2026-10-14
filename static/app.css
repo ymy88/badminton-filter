@@ -48,6 +48,7 @@ input:not([type=checkbox], [type=radio]), select {
 }
 input[type=checkbox], input[type=radio] { accent-color: var(--c-primary); margin: 0 4px 0 0; vertical-align: -2px; }
 label { cursor: pointer; }
+a { color: var(--c-primary); text-decoration: none; &:hover { text-decoration: underline; } }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--c-line); text-align: left; vertical-align: top; }

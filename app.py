@@ -18,6 +18,10 @@ def create_app(conn, config, db_path=None):
     def index():
         return send_from_directory("static", "index.html")
 
+    @app.get("/venues")
+    def venues_page():
+        return send_from_directory("static", "venues.html")
+
     @app.get("/static/<path:p>")
     def static_file(p):  # 页面引用的 css/js（static_folder=None，统一走这里）
         return send_from_directory("static", p)
@@ -74,7 +78,9 @@ def create_app(conn, config, db_path=None):
 
     @app.get("/api/venues")
     def venues_list():
-        return jsonify({"venues": sync.venue_rows(conn)})
+        # 管理页整张表 + 全部统一球场（编辑区「选已有统一球场」用）
+        canon = [dict(r) for r in conn.execute("SELECT id, amap_name, lat, lng FROM canonical_venues ORDER BY amap_name")]
+        return jsonify({"venues": sync.venue_rows(conn), "canonicals": canon})
 
     @app.get("/api/amap/search")
     def amap_search():  # 管理页「在高德搜索」：前 10 个 POI

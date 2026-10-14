@@ -117,4 +117,19 @@ function pyMatch(text, q, py) {
   return !!py && /^[a-z0-9]+$/.test(l) && (py[0].includes(l) || py[1].includes(l));
 }
 
-export { applyFilters, sortGames, pyMatch, parseTags };
+// 候选推荐：原文/拼音包含 q 的排最前，其余按相邻两字组合(bigram)重合度排序；都不沾边的不要
+// 用于球馆管理页「已有统一球场」——平台馆名「宝山体育中心」也能推荐出「宝山体育馆」
+function rankCandidates(q, names, py = {}, k = 8, minSim = 0.25) {
+  const grams = (s) => { s = s.toLowerCase().replace(/\s+/g, ""); const g = new Set();
+    for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+  const gq = grams(q);
+  const scored = names.map((n) => {
+    if (pyMatch(n, q, py[n])) return [n, 2];  // 包含匹配优先
+    const gn = grams(n);
+    const inter = [...gq].filter((x) => gn.has(x)).length;
+    return [n, inter / (gq.size + gn.size - inter || 1)];
+  }).filter(([, s]) => s >= minSim);
+  return scored.sort((a, b) => b[1] - a[1]).slice(0, k).map(([n]) => n);
+}
+
+export { applyFilters, sortGames, pyMatch, parseTags, rankCandidates };

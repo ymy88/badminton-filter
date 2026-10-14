@@ -1,6 +1,6 @@
 // 前端筛选纯函数自测：node tests/filters.test.mjs
 import assert from "node:assert";
-import { applyFilters, sortGames, pyMatch, parseTags } from "../static/filters.js";
+import { applyFilters, sortGames, pyMatch, parseTags, rankCandidates } from "../static/filters.js";
 
 const g = (o) => Object.assign({
   date: "2026-10-11", start_time: "19:00", duration_min: 120,
@@ -118,3 +118,10 @@ assert.deepEqual(parseTags('["a",""]'), ["a"]);
 // 降序：值倒过来，缺失值仍排最后
 assert.equal(ids(sortGames([g({ id: "a", price: 10 }), g({ id: "b", price: null }), g({ id: "c", price: 50 })], "price", null, true)), "c,a,b");
 assert.equal(ids(sortGames([g({ id: "a", club_name: "甲" }), g({ id: "b", club_name: "" }), g({ id: "c", club_name: "乙" })], "club", null, true)), "c,a,b");
+
+// 候选推荐：包含/拼音匹配最前，其余按 bigram 重合度；不相关的不出
+const names = ["宝山体育馆", "徐家汇体育公园", "宝山体育中心游泳馆", "万体汇"];
+assert.deepEqual(rankCandidates("宝山体育中心", names), ["宝山体育中心游泳馆", "宝山体育馆"]);
+assert.deepEqual(rankCandidates("wth", names, { "万体汇": ["wantihui", "wth"] }), ["万体汇"]);
+assert.deepEqual(rankCandidates("", names), names);  // 空查询：都算包含，原序
+

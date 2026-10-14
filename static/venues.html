@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>球馆管理</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* 本页布局；颜色/圆角引用 app.css 的变量 */
+  header { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 16px;
+    background: var(--c-surface); border-bottom: 1px solid var(--c-line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .sep { flex: 1; }
+  main { padding: 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 14px; margin-bottom: 12px; }
+  .bar label { margin-right: 10px; }
+  #q { width: 260px; }
+  section { padding: 8px; overflow-x: auto; }
+  td.ops { white-space: nowrap; }
+  td.ops button { padding: 2px 8px; font-size: 13px; margin-right: 4px; }
+  .st { font-size: var(--fs-sm); padding: 1px 6px; border-radius: 3px; white-space: nowrap; background: var(--c-surface-2); }
+  .st.pending, .st.suspect { background: var(--c-warn-bg); color: #8a5a00; }
+  .st.confirmed, .st.manual { background: #e3f4ea; color: var(--c-ok); }
+  .st.none { background: var(--c-bad-bg); color: var(--c-danger); }
+  .why { display: block; font-size: var(--fs-sm); color: #8a5a00; }
+  .src { font-size: var(--fs-sm); padding: 0 6px; border-radius: 3px; white-space: nowrap; margin-right: 3px; }
+  .src.zhongyulian { background: #fdeee0; color: #b25b12; }
+  .src.flashx { background: #e3f4ea; color: #1d7a45; }
+  tr.edit td { background: var(--c-surface-2); }
+  .ed { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+  .ed .row { display: flex; gap: 8px; align-items: center; }
+  .ed input { flex: 1; }
+  .pick { border: 1px solid var(--c-line); border-radius: var(--radius); background: var(--c-surface); }
+  .pick:empty { display: none; }
+  .pick div { padding: 5px 8px; cursor: pointer; border-bottom: 1px solid var(--c-line); }
+  .pick div:last-child { border-bottom: none; }
+  .pick div:hover { background: var(--c-hover); }
+  .pick small { color: var(--c-muted); margin-left: 6px; }
+  .pick .head { cursor: default; color: var(--c-muted); font-size: var(--fs-sm); background: var(--c-surface-2); }
+  .pick .head:hover { background: var(--c-surface-2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>球馆管理</h1>
+  <a href="/">← 返回球局</a>
+  <span class="sep"></span>
+  <span id="status"></span>
+</header>
+<main>
+  <div class="bar card">
+    <span>
+      <label><input type="radio" name="view" value="todo" checked>待处理 <span id="nTodo"></span></label>
+      <label><input type="radio" name="view" value="all">全部 <span id="nAll"></span></label>
+    </span>
+    <input id="q" type="text" placeholder="按平台馆名或高德名搜索，支持拼音">
+  </div>
+  <section class="card">
+    <table>
+      <thead><tr><th>平台馆名</th><th>来源</th><th>球局数</th><th>高德 POI</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </section>
+</main>
+
+<script type="module">
+import { pyMatch, rankCandidates } from "/static/filters.js";
+import { $, SRC, esc, api, PY, ensurePinyin } from "/static/common.js";
+
+let rows = [], canonicals = [];
+let editing = null;  // 正在编辑的 platform_name_norm（同一时间只开一个编辑区）
+
+const mapLink = (name, lat, lng) => lat == null ? "" :
+  ` <a href="https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}" target="_blank" rel="noopener">地图</a>`;
+// updated_at 是 SQLite datetime('now')（UTC）→ 本地时间
+const localTime = (t) => new Date(t.replace(" ", "T") + "Z").toLocaleString("zh-CN", { hour12: false });
+const isTodo = (v) => v.origin === "pending" || v.suspect.length > 0;
+
+function status(v) {
+  if (v.origin === "pending")
+    return `<span class="st pending">未归类</span><span class="why">${v.updated_at ? "上次搜索失败 " + esc(localTime(v.updated_at)) : "还没搜索（点主页「算通勤」）"}</span>`;
+  if (v.origin === "auto" && v.suspect.length)
+    return `<span class="st suspect">自动·可疑</span>${v.suspect.map((s) => `<span class="why">${esc(s)}</span>`).join("")}`;
+  const label = { auto: "自动", confirmed: "已确认", manual: "手动", none: "高德搜不到" }[v.origin];
+  return `<span class="st ${v.origin}">${label}</span>`;
+}
+
+function ops(v) {
+  const b = (act, text) => `<button data-act="${act}">${text}</button>`;
+  return [
+    v.origin === "auto" ? b("confirm", "确认无误") : "",
+    b("edit", "修改"),
+    ["auto", "pending"].includes(v.origin) ? b("none", "标记搜不到") : b("reset", "恢复自动"),
+  ].join("");
+}
+
+function rowHtml(v) {
+  const c = v.canonical;
+  return `<tr data-norm="${esc(v.platform_name_norm)}">
+    <td>${esc(v.name)}</td>
+    <td>${v.sources.map((s) => `<span class="src ${esc(s)}">${esc(SRC[s] || s)}</span>`).join("")}</td>
+    <td>${v.game_count}</td>
+    <td>${c ? esc(c.amap_name) + mapLink(c.amap_name, c.lat, c.lng) : '<span class="muted">—</span>'}</td>
+    <td>${status(v)}</td>
+    <td class="ops">${ops(v)}</td></tr>`;
+}
+
+function render() {
+  const view = document.querySelector("input[name=view]:checked").value;
+  const q = $("q").value.trim();
+  const hit = (s) => s && pyMatch(s, q, PY[s]);
+  const shown = rows.filter((v) => (view === "all" || isTodo(v)) && (!q || hit(v.name) || hit(v.canonical?.amap_name)));
+  $("nTodo").textContent = `(${rows.filter(isTodo).length})`;
+  $("nAll").textContent = `(${rows.length})`;
+  $("tbody").innerHTML = shown.map(rowHtml).join("") ||
+    `<tr><td colspan="6" class="muted">${view === "todo" && !q ? "没有待处理的场馆 🎉" : "没有匹配的场馆"}</td></tr>`;
+  if (editing) {  // 重绘后恢复编辑区
+    const tr = document.querySelector(`tr[data-norm="${CSS.escape(editing)}"]`);
+    if (tr) openEditor(tr); else editing = null;
+  }
+}
+
+async function load() {
+  const d = await api("/api/venues");
+  rows = d.venues; canonicals = d.canonicals;
+  render();
+  ensurePinyin([...rows.map((v) => v.name), ...canonicals.map((c) => c.amap_name)]);
+}
+
+// ---- 编辑区：先选已有统一球场；没有合适的再搜高德 ----
+function openEditor(tr) {
+  document.querySelectorAll("tr.edit").forEach((e) => e.remove());
+  const v = rows.find((x) => x.platform_name_norm === tr.dataset.norm);
+  editing = v.platform_name_norm;
+  const ed = document.createElement("tr");
+  ed.className = "edit";
+  ed.innerHTML = `<td colspan="6"><div class="ed">
+    <div class="row"><input type="text" value="${esc(v.name)}"><button data-act="amap">在高德搜索</button><button data-act="close">取消</button></div>
+    <div class="pick canon"></div><div class="pick amap"></div></div></td>`;
+  tr.after(ed);
+  const input = ed.querySelector("input");
+  const showCanon = () => {
+    const q = input.value.trim();
+    const byName = new Map(canonicals.map((c) => [c.amap_name, c]));
+    const hits = q ? rankCandidates(q, [...byName.keys()], PY).map((n) => byName.get(n)) : [];
+    ed.querySelector(".canon").innerHTML = hits.length ? `<div class="head">已有统一球场（按名字相近程度）</div>` +
+      hits.map((c) => `<div data-cid="${c.id}">${esc(c.amap_name)}${mapLink(c.amap_name, c.lat, c.lng)}</div>`).join("") : "";
+  };
+  input.addEventListener("input", showCanon);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") searchAmap(ed); });
+  showCanon();
+  input.focus();
+}
+
+async function searchAmap(ed) {
+  const q = ed.querySelector("input").value.trim();
+  if (!q) return;
+  const box = ed.querySelector(".amap");
+  box.innerHTML = `<div class="head">高德搜索中…</div>`;
+  try {
+    const { pois } = await api(`/api/amap/search?q=${encodeURIComponent(q)}`);
+    ed._pois = pois;
+    box.innerHTML = `<div class="head">高德搜索结果（${pois.length}）</div>` + (pois.map((p, i) =>
+      `<div data-poi="${i}">${esc(p.name)}<small>${esc(p.district)} ${esc(p.address)}</small>${mapLink(p.name, p.lat, p.lng)}</div>`).join("")
+      || `<div class="head">高德没有搜到，换个关键字试试；确实没有就点「标记搜不到」</div>`);
+  } catch (e) { box.innerHTML = `<div class="head err">高德搜索失败：${esc(e.message)}</div>`; }
+}
+
+async function act(norm, path, body = {}) {
+  try {
+    const r = await api(path, { platform_name_norm: norm, ...body });
+    editing = null;
+    await load();
+    return r;
+  } catch (e) { $("status").className = "err"; $("status").textContent = "操作失败：" + e.message; }
+}
+
+async function assign(norm, body, label) {
+  const r = await act(norm, "/api/venues/assign", body);
+  if (!r) return;
+  $("status").className = "ok";
+  $("status").textContent = `已归到「${label}」` + (r.has_commute ? "" : "；这个场馆的通勤还没算，回主页点「算通勤」");
+}
+
+$("tbody").addEventListener("click", (e) => {
+  if (e.target.closest("a")) return;  // 地图链接照常打开
+  const tr = e.target.closest("tr");
+  const norm = tr?.dataset.norm || tr?.previousElementSibling?.dataset.norm;
+  const btn = e.target.closest("button");
+  const pick = e.target.closest(".pick > div[data-cid], .pick > div[data-poi]");
+  if (btn) {
+    const a = btn.dataset.act;
+    if (a === "edit") openEditor(tr);
+    else if (a === "close") { editing = null; tr.remove(); }
+    else if (a === "amap") searchAmap(tr);
+    else if (a === "confirm") act(norm, "/api/venues/confirm");
+    else if (a === "reset") act(norm, "/api/venues/reset");
+    else if (a === "none" && confirm("确认高德地图上没有这个场馆？标记后不再自动搜索，通勤保持「未知」。")) act(norm, "/api/venues/none");
+  } else if (pick?.dataset.cid) {
+    const c = canonicals.find((x) => x.id === Number(pick.dataset.cid));
+    assign(norm, { canonical_id: c.id }, c.amap_name);
+  } else if (pick?.dataset.poi) {
+    const p = tr._pois[Number(pick.dataset.poi)];
+    assign(norm, { poi: { amap_id: p.amap_id, name: p.name, lat: p.lat, lng: p.lng } }, p.name);
+  }
+});
+document.querySelectorAll("input[name=view]").forEach((el) => el.addEventListener("change", render));
+$("q").addEventListener("input", render);
+
+load().catch((e) => { $("status").className = "err"; $("status").textContent = "加载失败：" + e.message; });
+</script>
+</body>
+</html>
