@@ -149,9 +149,10 @@ lat, lng   平台原始坐标          origin                           amap_id 
 ### 3.5 删除的代码
 
 - `venues.classify`（子串匹配）。
-- `sync.enrich_venue` 中的地理编码兜底；`commute.geocode`。
+- `sync.enrich_venue` 中拿馆名做地理编码的兜底。`commute.geocode` 本身保留：家/公司地址（`/api/origins`）仍用它把地址换算成坐标，这是地理编码的正当用途。
 - `sync.seed_canonical_venues`、`sync.load_canonical_list`；`config.json` 中 `canonical_venues` 配置项随之失效（README 同步更新）。
 - `upsert_games` 中的保留逻辑（`_KEEP`）。
+- `/api/config` 返回的 `canonical_names`（前端未使用）。
 
 ---
 
