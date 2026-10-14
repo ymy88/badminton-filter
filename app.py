@@ -162,6 +162,27 @@ def create_app(conn, config, db_path=None):
         _set_alias(row["platform_name_norm"], "pending", None, touched="NULL")
         return jsonify({"ok": True})
 
+    @app.post("/api/venues/restore")
+    def venues_restore():
+        # 撤销：把这一行整行写回操作前的状态（前端操作前记下的 origin/canonical_id/last_search/updated_at）
+        body, row, err = _alias_req()
+        if err:
+            return err
+        origin, cid = body.get("origin"), body.get("canonical_id")
+        ls, ts = body.get("last_search"), body.get("updated_at")
+        has_cid = origin in ("auto", "confirmed", "manual")
+        ok = (origin in ("pending", "auto", "confirmed", "manual", "none")
+              and (isinstance(cid, int) and not isinstance(cid, bool) if has_cid else cid is None)
+              and ls in (None, "error", "empty", "dup") and (ts is None or isinstance(ts, str)))
+        if not ok:
+            return jsonify({"ok": False, "msg": "origin/canonical_id/last_search/updated_at 不合法"}), 400
+        if has_cid and not conn.execute("SELECT 1 FROM canonical_venues WHERE id=?", (cid,)).fetchone():
+            return jsonify({"ok": False, "msg": "没有这个统一球场"}), 404
+        conn.execute("UPDATE venue_aliases SET origin=?, canonical_id=?, last_search=?, updated_at=?"
+                     " WHERE platform_name_norm=?", (origin, cid, ls, ts, row["platform_name_norm"]))
+        conn.commit()
+        return jsonify({"ok": True})
+
     @app.get("/api/origins")
     def get_origins():
         rows = {r["key"]: r for r in conn.execute("SELECT key,address,lat FROM origins")}

@@ -208,6 +208,7 @@ lat, lng   平台原始坐标          origin                           amap_id 
 | `POST /api/venues/confirm` | `{platform_name_norm}`：`auto` → `confirmed` |
 | `POST /api/venues/none` | `{platform_name_norm}`：`origin = none`，清空 `canonical_id` |
 | `POST /api/venues/reset` | `{platform_name_norm}`：改回 `pending`，清空 `canonical_id` |
+| `POST /api/venues/restore` | `{platform_name_norm, origin, canonical_id, last_search, updated_at}`：撤销，整行写回操作前的状态（前端操作前记下）。管理页操作过的行在「待处理」里不消失、带「撤销」按钮，刷新页面后清空；撤销「改归到新 POI」不删已新建的统一球场 |
 
 写接口对不存在的 `platform_name_norm` 返回 404，参数缺失或类型不对返回 400。`assign` 传入新 POI 时，若 `amap_name` 与已有统一球场重名而 `amap_id` 不同，唯一约束报错，接口返回 409 并提示重名（出现了再决定怎么处理）。
 

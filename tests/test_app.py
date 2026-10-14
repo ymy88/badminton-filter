@@ -267,6 +267,34 @@ def test_confirm_none_reset():
     assert v["origin"] == "pending" and v["canonical"] is None and v["updated_at"] is None
     assert c.post("/api/venues/none", json={"platform_name_norm": "没有"}).status_code == 404
 
+def test_restore_puts_row_back():
+    # 撤销：整行写回操作前的状态
+    conn, c = _venue_app()
+    before = _row(c, "堂颂羽毛球馆(淞南店)")
+    c.post("/api/venues/none", json={"platform_name_norm": "堂颂羽毛球馆(淞南店)"})
+    keep = {k: before[k] for k in ("origin", "last_search", "updated_at")}
+    r = c.post("/api/venues/restore", json={"platform_name_norm": "堂颂羽毛球馆(淞南店)", "canonical_id": 1, **keep})
+    assert r.get_json()["ok"]
+    after = _row(c, "堂颂羽毛球馆(淞南店)")
+    assert after["origin"] == "auto" and after["canonical"]["id"] == 1 and after["updated_at"] == before["updated_at"]
+    # 未搜过的 pending 写回：canonical_id 为空
+    conn.execute("UPDATE venue_aliases SET last_search='empty', updated_at='2026-01-01' WHERE platform_name_norm='野馆'")
+    c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "canonical_id": 2})
+    c.post("/api/venues/restore", json={"platform_name_norm": "野馆", "origin": "pending", "canonical_id": None,
+                                        "last_search": "empty", "updated_at": "2026-01-01"})
+    p = _row(c, "野馆")
+    assert (p["origin"], p["canonical"], p["last_search"], p["updated_at"]) == ("pending", None, "empty", "2026-01-01")
+
+def test_restore_errors():
+    conn, c = _venue_app()
+    base = {"platform_name_norm": "野馆", "last_search": None, "updated_at": None}
+    assert c.post("/api/venues/restore", json=dict(base, origin="bogus", canonical_id=None)).status_code == 400
+    assert c.post("/api/venues/restore", json=dict(base, origin="manual", canonical_id=None)).status_code == 400
+    assert c.post("/api/venues/restore", json=dict(base, origin="pending", canonical_id=2)).status_code == 400
+    assert c.post("/api/venues/restore", json=dict(base, origin="pending", canonical_id=None, last_search="x")).status_code == 400
+    assert c.post("/api/venues/restore", json=dict(base, origin="manual", canonical_id=99)).status_code == 404
+    assert _row(c, "野馆")["origin"] == "pending"
+
 def test_amap_search(monkeypatch):
     seen = {}
     monkeypatch.setattr(commute, "poi_search", lambda q, limit=1: seen.update(q=q, limit=limit) or [{"amap_id": "B1"}])

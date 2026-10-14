@@ -27,6 +27,7 @@
   .src.zhongyulian { background: #fdeee0; color: #b25b12; }
   .src.flashx { background: #e3f4ea; color: #1d7a45; }
   tr.edit td { background: var(--c-surface-2); }
+  tr.done td { background: var(--c-hover); }  /* 本次操作过、可撤销的行 */
   .ed { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
   .ed .row { display: flex; gap: 8px; align-items: center; }
   .ed input { flex: 1; }
@@ -69,6 +70,9 @@ import { $, SRC, esc, api, PY, ensurePinyin } from "/static/common.js";
 
 let rows = [], canonicals = [];
 let editing = null;  // 正在编辑的 platform_name_norm（同一时间只开一个编辑区）
+// 本次打开页面后操作过的行：platform_name_norm → 最近一次操作前的状态。
+// 这些行在「待处理」里不消失，带「撤销」按钮；刷新页面后清空
+const undo = new Map();
 
 const mapLink = (name, lat, lng) => lat == null ? "" :
   ` <a href="https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}" target="_blank" rel="noopener">地图</a>`;
@@ -91,8 +95,9 @@ function status(v) {
 }
 
 function ops(v) {
-  const b = (act, text) => `<button data-act="${act}">${text}</button>`;
+  const b = (act, text, cls = "") => `<button data-act="${act}" class="${cls}">${text}</button>`;
   return [
+    undo.has(v.platform_name_norm) ? b("undo", "撤销", "primary") : "",
     v.origin === "auto" ? b("confirm", "确认无误") : "",
     b("edit", "修改"),
     ["auto", "pending"].includes(v.origin) ? b("none", "标记搜不到") : b("reset", "恢复自动"),
@@ -101,7 +106,7 @@ function ops(v) {
 
 function rowHtml(v) {
   const c = v.canonical;
-  return `<tr data-norm="${esc(v.platform_name_norm)}">
+  return `<tr data-norm="${esc(v.platform_name_norm)}"${undo.has(v.platform_name_norm) ? ' class="done"' : ""}>
     <td>${esc(v.name)}</td>
     <td>${v.sources.map((s) => `<span class="src ${esc(s)}">${esc(SRC[s] || s)}</span>`).join("")}</td>
     <td>${v.game_count}</td>
@@ -114,7 +119,7 @@ function render() {
   const view = document.querySelector("input[name=view]:checked").value;
   const q = $("q").value.trim();
   const hit = (s) => s && pyMatch(s, q, PY[s]);
-  const shown = rows.filter((v) => (view === "all" || isTodo(v)) && (!q || hit(v.name) || hit(v.canonical?.amap_name)));
+  const shown = rows.filter((v) => (view === "all" || isTodo(v) || undo.has(v.platform_name_norm)) && (!q || hit(v.name) || hit(v.canonical?.amap_name)));
   $("nTodo").textContent = `(${rows.filter(isTodo).length})`;
   $("nAll").textContent = `(${rows.length})`;
   $("tbody").innerHTML = shown.map(rowHtml).join("") ||
@@ -172,8 +177,11 @@ async function searchAmap(ed) {
 }
 
 async function act(norm, path, body = {}) {
+  const v = rows.find((x) => x.platform_name_norm === norm);
+  const prev = { origin: v.origin, canonical_id: v.canonical?.id ?? null, last_search: v.last_search, updated_at: v.updated_at };
   try {
     const r = await api(path, { platform_name_norm: norm, ...body });
+    if (path === "/api/venues/restore") undo.delete(norm); else undo.set(norm, prev);
     editing = null;
     await load();
     return r;
@@ -200,7 +208,10 @@ $("tbody").addEventListener("click", (e) => {
     else if (a === "amap") searchAmap(tr);
     else if (a === "confirm") act(norm, "/api/venues/confirm");
     else if (a === "reset") act(norm, "/api/venues/reset");
-    else if (a === "none" && confirm("确认高德地图上没有这个场馆？标记后不再自动搜索，通勤保持「未知」。")) act(norm, "/api/venues/none");
+    else if (a === "none") act(norm, "/api/venues/none");
+    else if (a === "undo") act(norm, "/api/venues/restore", undo.get(norm)).then((r) => {
+      if (r) { $("status").className = "ok"; $("status").textContent = "已撤销"; }
+    });
   } else if (pick?.dataset.cid) {
     const c = canonicals.find((x) => x.id === Number(pick.dataset.cid));
     assign(norm, { canonical_id: c.id }, c.amap_name);
