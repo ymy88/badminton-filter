@@ -1,4 +1,4 @@
-// 球局筛选与排序纯函数：浏览器挂全局，node 下 require 自测。
+// 球局筛选与排序纯函数（ES 模块）：主页 import，node 下 tests/filters.test.mjs 自测。
 
 // 开始时间 "HH:MM" → 当日分钟数；缺失返回 null
 function startMinutes(t) {
@@ -117,4 +117,4 @@ function pyMatch(text, q, py) {
   return !!py && /^[a-z0-9]+$/.test(l) && (py[0].includes(l) || py[1].includes(l));
 }
 
-if (typeof module !== "undefined") module.exports = { applyFilters, sortGames, pyMatch, parseTags };
+export { applyFilters, sortGames, pyMatch, parseTags };

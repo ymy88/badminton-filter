@@ -114,15 +114,14 @@
   </section>
 </main>
 
-<script src="/static/filters.js"></script>
-<script>
+<script type="module">
+import { applyFilters, sortGames, pyMatch, parseTags } from "/static/filters.js";
+import { $, SRC, esc, api, PY, ensurePinyin } from "/static/common.js";
+
 window._games = [];
-const $ = (id) => document.getElementById(id);
-const SRC = { zhongyulian: "中羽联", flashx: "闪动" };
 const radio = (name) => document.querySelector(`input[name=${name}]:checked`).value;
 const num = (id) => ($(id).value === "" ? null : Number($(id).value));
 const range = (a, b) => (num(a) == null && num(b) == null ? null : [num(a) ?? 0, num(b) ?? Infinity]);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // 日期：今天偏移 off 天 → 本地 "YYYY-MM-DD"
 const dateForOffset = (off) => { const d = new Date(); d.setDate(d.getDate() + off);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -170,14 +169,6 @@ function makeChips(boxId, getOptions, { allowNew = false, onChange = () => {} } 
 }
 const chips = {};          // 胶囊控件：id → 控件（id 同时是存库的字段名）
 const kwSeen = new Set();  // 用过的关键字（下拉候选）
-const PY = {};             // 下拉候选文本 → [全拼, 首字母]
-
-// 给下拉候选补拼音（只查缓存里没有的）；查不到只影响拼音匹配
-async function ensurePinyin(texts) {
-  const need = [...new Set(texts)].filter((t) => t && !(t in PY));
-  if (!need.length) return;
-  try { Object.assign(PY, await api("/api/pinyin", { texts: need })); } catch (e) { /* 忽略 */ }
-}
 
 // 筛选条件整份存库，页面加载时恢复
 const FIELDS = ["date", "timeBucket", "dur", "priceMax", "source", "homeCommuteMax", "companyCommuteMax", "unkCommute",
@@ -204,13 +195,6 @@ function saveFilters() {  // 防抖：连续输入数字只存最后一次
     .catch((e) => { $("status").textContent = "筛选条件保存失败：" + e; }), 300);
 }
 const onFormChange = () => { render(); saveFilters(); };
-
-async function api(path, body) {
-  const r = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(`${path} ${r.status}`);  // 否则 500 时 r.json() 抛，页面静默卡死
-  return r.json();
-}
 
 // 读表单拼 criteria
 function buildCriteria() {

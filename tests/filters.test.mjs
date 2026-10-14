@@ -1,6 +1,6 @@
-// 前端筛选纯函数自测：node tests/filters.test.js
-const assert = require("assert");
-const { applyFilters, sortGames, pyMatch, parseTags } = require("../static/filters.js");
+// 前端筛选纯函数自测：node tests/filters.test.mjs
+import assert from "node:assert";
+import { applyFilters, sortGames, pyMatch, parseTags } from "../static/filters.js";
 
 const g = (o) => Object.assign({
   date: "2026-10-11", start_time: "19:00", duration_min: 120,
