@@ -4,81 +4,59 @@
 <meta charset="utf-8">
 <title>羽毛球球局筛选</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <style>
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", sans-serif; color: #222; background: #f5f6f8; }
-  header { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid #ddd; }
-  header.bad { background: #fde8e8; }
-  header label { margin-right: 6px; }
-  button { cursor: pointer; padding: 4px 12px; }
-  #banner { padding: 8px 16px; background: #fff3cd; display: none; }
-  #addr { display: none; padding: 10px 16px; background: #fafafa; border-bottom: 1px solid #ddd; }
+  /* 本页布局；颜色/圆角引用 app.css 的变量 */
+  header { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 16px;
+    background: var(--c-surface); border-bottom: 1px solid var(--c-line); }
+  header.bad { background: var(--c-bad-bg); }
+  header label { margin-right: 8px; }
+  header .sep { flex: 1; }
+  #banner { padding: 8px 16px; background: var(--c-warn-bg); display: none; }
+  #addr { display: none; padding: 10px 16px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-line); }
   #addr div { margin: 4px 0; }
   #addr input { width: 360px; }
-  .err { color: #c00; }
-  .ok { color: #070; }
   main { padding: 16px; }
-  aside { background: #fff; padding: 4px 12px; border-radius: 6px; margin-bottom: 16px; }
+  aside { padding: 4px 14px; margin-bottom: 16px; }
   .grp { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; padding: 10px 0; }
-  .grp + .grp { border-top: 1px solid #eee; }
+  .grp + .grp { border-top: 1px solid var(--c-line); }
   aside .f { margin: 0; min-width: 0; }
-  aside .f > span { display: block; color: #666; font-size: 12px; margin-bottom: 2px; }
-  aside .f > label { display: block; font-size: 13px; }
-  aside input[type=number] { width: 70px; }
+  aside .f > span { display: block; color: var(--c-muted); font-size: var(--fs-sm); margin-bottom: 2px; }
+  aside .f > label { display: flex; align-items: center; height: 28px; font-size: 13px; }
+  aside input[type=number] { width: 72px; }
   aside select { min-width: 130px; }
-  section { background: #fff; border-radius: 6px; padding: 8px; overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+  section { padding: 8px; overflow-x: auto; }
+  #count { padding: 2px 8px 6px; }
   th.s { cursor: pointer; user-select: none; }
-  th.s:hover { background: #eef; }
+  th.s:hover, th.s.on { color: var(--c-primary); }
+  th.s.on::after { content: " ↑"; }  /* 当前排序列：升序 ↑ / 降序 ↓ */
+  th.s.on.desc::after { content: " ↓"; }
   tr.row { cursor: pointer; }
-  tr.row:hover { background: #f7faff; }
-  tr.detail td { background: #fafafa; color: #444; white-space: pre-wrap; }
-  .tag { display: inline-block; padding: 0 6px; margin: 0 3px 2px 0; background: #e8eefc; border-radius: 8px; font-size: 12px; }
-  .src { font-size: 12px; padding: 0 6px; border-radius: 3px; background: #ddd; }
-  .muted { color: #999; }
+  tr.row:hover { background: var(--c-hover); }
+  tr.detail td { background: var(--c-surface-2); color: #444; white-space: pre-wrap; }
+  .src { font-size: var(--fs-sm); padding: 0 6px; border-radius: 3px; white-space: nowrap; }
+  .src.zhongyulian { background: #fdeee0; color: #b25b12; }
+  .src.flashx { background: #e3f4ea; color: #1d7a45; }
+  .help { cursor: pointer; display: inline-flex; width: 15px; height: 15px; border-radius: 50%; background: var(--c-muted);
+    color: #fff; font-size: 11px; font-weight: bold; align-items: center; justify-content: center; vertical-align: 1px; }
   .helpwrap { position: relative; display: inline-block; }
-  .help { cursor: pointer; display: inline-flex; width: 15px; height: 15px; border-radius: 50%;
-    background: #a9b0bd; color: #fff; font-size: 11px; font-weight: bold; align-items: center; justify-content: center; }
   .pop { display: none; position: absolute; top: 120%; left: 0; z-index: 20; background: #333; color: #fff;
-    padding: 6px 9px; border-radius: 4px; font-size: 12px; font-weight: normal; white-space: nowrap;
-    box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+    padding: 6px 9px; border-radius: 4px; font-size: var(--fs-sm); font-weight: normal; white-space: nowrap; box-shadow: var(--shadow); }
   .pop.show { display: block; }
-  .chipbox { border: 1px solid #ccc; border-radius: 6px; padding: 2px 4px; display: flex;
-    flex-wrap: wrap; gap: 3px; position: relative; min-height: 28px; min-width: 180px; align-items: center; cursor: text; background: #fff; }
-  .chip { background: #e0e7ff; border-radius: 10px; padding: 1px 6px; font-size: 12px;
-    display: inline-flex; align-items: center; gap: 4px; }
-  .chip b { cursor: pointer; color: #888; font-weight: normal; }
-  .chipbox input { border: none; outline: none; flex: 1; min-width: 50px; font-size: 13px; background: transparent; }
-  .dd { position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px; background: #fff;
-    border: 1px solid #ccc; border-radius: 6px; max-height: 200px; overflow: auto; z-index: 10;
-    box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-  .dd div { padding: 4px 8px; cursor: pointer; font-size: 13px; }
-  .dd div:hover { background: #eef; }
 </style>
 </head>
 <body>
 <header id="top">
-  <span>通勤方式
+  <span>当前通勤方式（排序和筛选）
     <label><input type="radio" name="mode" value="drive_min" checked>驾车</label>
     <label><input type="radio" name="mode" value="transit_min">公交</label>
   </span>
-  <label>排序
-    <select id="sortBy">
-      <option value="start_time">开始时间</option>
-      <option value="commute_home">家通勤</option>
-      <option value="commute_company">公司通勤</option>
-      <option value="price">价格</option>
-      <option value="open">剩余空位</option>
-      <option value="applied">已报名</option>
-      <option value="club">俱乐部</option>
-    </select>
-  </label>
+  <span class="sep"></span>
+  <span id="status"></span>
   <button id="addrBtn">设置地址</button>
   <button id="refreshBtn">刷新球局</button>
   <button id="commuteBtn">算通勤</button>
-  <button id="capBtn" style="display:none">抓取凭证</button>
-  <span id="status"></span>
+  <button id="capBtn" class="danger" style="display:none">抓取凭证</button>
 </header>
 <div id="banner">请先在『设置地址』填家和公司地址</div>
 <div id="addr">
@@ -87,7 +65,7 @@
   <div><button id="addrSave">保存</button></div>
 </div>
 <main>
-  <aside id="form">
+  <aside id="form" class="card">
     <div class="grp">
       <div class="f"><span>日期</span><select id="date">
         <option value="">不限</option><option value="0">今天</option>
@@ -101,6 +79,8 @@
         <option value="120,180">2小时</option><option value="180,240">3小时</option>
         <option value="240,">4小时及以上</option></select></div>
       <div class="f"><span>价格上限</span><input type="number" id="priceMax" min="0"></div>
+      <div class="f"><span>来源</span><select id="source">
+        <option value="">不限</option><option value="zhongyulian">中羽联</option><option value="flashx">闪动</option></select></div>
     </div>
     <div class="grp">
       <div class="f"><span>家通勤上限（分钟，按当前方式）</span><input type="number" id="homeCommuteMax" min="0"></div>
@@ -121,20 +101,20 @@
       <div class="f"><span>关键字排除</span><div class="chipbox" id="kwExc"></div></div>
     </div>
   </aside>
-  <section>
+  <section class="card">
     <div id="count" class="muted"></div>
     <table>
       <thead><tr>
-        <th class="s" data-sort="start_time">时间</th><th>时长</th><th>场馆 <span class="helpwrap"><span class="help" id="venueHelp">?</span><span class="pop" id="venuePop">上一行：平台读取到的名字<br>下一行：高德地图搜到的名字</span></span></th><th class="s" data-sort="club">俱乐部</th>
+        <th class="s" data-sort="start_time">时间</th><th class="s" data-sort="duration">时长</th><th class="s" data-sort="venue">场馆 <span class="helpwrap"><span class="help" id="venueHelp">?</span><span class="pop" id="venuePop">上一行：平台读取到的名字<br>下一行：高德地图搜到的名字</span></span></th><th class="s" data-sort="club">俱乐部</th>
         <th class="s" data-sort="commute_home">家通勤</th><th class="s" data-sort="commute_company">公司通勤</th><th class="s" data-sort="price">价格</th>
-        <th class="s" data-sort="applied">报名</th><th>来源</th><th>标签</th>
+        <th class="s" data-sort="applied">报名</th><th class="s" data-sort="source">来源</th><th class="s" data-sort="tags">标签</th>
       </tr></thead>
       <tbody id="tbody"></tbody>
     </table>
   </section>
 </main>
 
-<script src="filters.js"></script>
+<script src="/static/filters.js"></script>
 <script>
 window._games = [];
 const $ = (id) => document.getElementById(id);
@@ -200,10 +180,11 @@ async function ensurePinyin(texts) {
 }
 
 // 筛选条件整份存库，页面加载时恢复
-const FIELDS = ["date", "timeBucket", "dur", "priceMax", "homeCommuteMax", "companyCommuteMax", "unkCommute",
-  "apMin", "apMax", "toMin", "toMax", "onlyOpen", "sortBy"];
+const FIELDS = ["date", "timeBucket", "dur", "priceMax", "source", "homeCommuteMax", "companyCommuteMax", "unkCommute",
+  "apMin", "apMax", "toMin", "toMax", "onlyOpen"];
+let sortBy = "start_time", sortDesc = false;  // 当前排序列与方向（点表头切换，随筛选条件存库）
 function formState() {
-  const f = { mode: radio("mode") };
+  const f = { mode: radio("mode"), sortBy, sortDesc };
   FIELDS.forEach((id) => { const el = $(id); f[id] = el.type === "checkbox" ? el.checked : el.value; });
   for (const [id, c] of Object.entries(chips)) f[id] = c.values();
   return f;
@@ -211,6 +192,7 @@ function formState() {
 function applyFormState(f) {
   if (!f) return;
   FIELDS.forEach((id) => { if (id in f) { const el = $(id); if (el.type === "checkbox") el.checked = !!f[id]; else el.value = f[id]; } });
+  if (document.querySelector(`th.s[data-sort="${f.sortBy}"]`)) { sortBy = f.sortBy; sortDesc = !!f.sortDesc; }  // 存的列已不存在则保持默认
   const m = document.querySelector(`input[name=mode][value="${f.mode}"]`);
   if (m) m.checked = true;
   for (const [id, c] of Object.entries(chips)) c.set(f[id]);
@@ -246,22 +228,13 @@ function buildCriteria() {
     venueInclude: chips.venueInc.values(), venueExclude: chips.venueExc.values(),
     clubInclude: chips.clubInc.values(), clubExclude: chips.clubExc.values(),
     priceMax: num("priceMax"),
+    source: $("source").value || null,
     appliedRange: range("apMin", "apMax"), totalRange: range("toMin", "toMax"),
     onlyOpen: $("onlyOpen").checked,
     kwInclude: chips.kwInc.values(), kwExclude: chips.kwExc.values(),
   };
 }
 
-// tags 格式不定：JSON 数组 → 标签；其它非空字符串 → 单个标签；空/异常 → 无
-function parseTags(t) {
-  if (!t) return [];
-  try {
-    const v = JSON.parse(t);
-    if (Array.isArray(v)) return v.map(String).filter(Boolean);
-    if (typeof v === "string" && v) return [v];
-    return [];
-  } catch (e) { return [String(t)]; }
-}
 
 const fmtWalk = (m) => m == null ? "未知" : (m < 1000 ? m + "m" : (m / 1000).toFixed(1) + "km");
 const fmtDur = (m) => m == null ? "—" : (Number.isInteger(m / 60) ? m / 60 : (m / 60).toFixed(1)) + "小时";
@@ -274,11 +247,11 @@ const fmtCommute = (c) => {
 function rowHtml(g) {
   const venue = esc(g.venue_name || "") + (g.canonical_name ? `<br><span class="muted">${esc(g.canonical_name)}</span>` : "");
   const tags = parseTags(g.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
-  return `<tr class="row"><td>${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
-    <td>${fmtDur(g.duration_min)}</td><td>${venue}</td><td>${esc(g.club_name || "—")}</td>
-    <td>${fmtCommute(g.commute?.home)}</td><td>${fmtCommute(g.commute?.company)}</td><td>${g.price == null ? "—" : esc(g.price)}</td>
+  return `<tr class="row"><td class="nowrap">${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
+    <td class="nowrap">${fmtDur(g.duration_min)}</td><td>${venue}</td><td>${esc(g.club_name || "—")}</td>
+    <td class="nowrap">${fmtCommute(g.commute?.home)}</td><td class="nowrap">${fmtCommute(g.commute?.company)}</td><td>${g.price == null ? "—" : esc(g.price)}</td>
     <td>${esc(g.applied_num)}/${esc(g.total_num)}</td>
-    <td><span class="src">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
+    <td><span class="src ${esc(g.source)}">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
     <tr class="detail" style="display:none"><td colspan="10">${esc(g.raw_text || "（无原文）")}
 组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
 回${esc(SRC[g.source] || g.source)}小程序按【${esc(g.date)} ${esc(g.start_time || "")}·${esc(g.venue_name || "")}】找这条报名；活动id ${esc(g.detail_ref || g.source_id || "—")}（仅供核对，不能直接搜）</td></tr>`;
@@ -286,9 +259,13 @@ function rowHtml(g) {
 
 function render() {
   const c = buildCriteria();
-  const rows = sortGames(applyFilters(window._games, c), $("sortBy").value, c.mode);
+  const rows = sortGames(applyFilters(window._games, c), sortBy, c.mode, sortDesc);
   $("tbody").innerHTML = rows.map((g) => rowHtml(g)).join("");
   $("count").textContent = `共 ${rows.length} / ${window._games.length} 场`;
+  document.querySelectorAll("th.s").forEach((th) => {
+    th.classList.toggle("on", th.dataset.sort === sortBy);
+    th.classList.toggle("desc", th.dataset.sort === sortBy && sortDesc);
+  });
 }
 
 async function loadGames() {
@@ -326,12 +303,17 @@ async function init() {
   } catch (e) { /* 状态查不到不影响主流程 */ }
 }
 
-// 筛选控件、方式、排序：改动即重渲染并存库（胶囊控件通过各自 onChange 触发）
-document.querySelectorAll("#form input, #form select, header input, #sortBy").forEach((el) => {
+// 筛选控件、通勤方式：改动即重渲染并存库（胶囊控件通过各自 onChange 触发；排序见表头点击）
+document.querySelectorAll("#form input, #form select, header input").forEach((el) => {
   el.addEventListener("input", onFormChange);
   el.addEventListener("change", onFormChange);
 });
-document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => { $("sortBy").value = th.dataset.sort; onFormChange(); }));
+document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => {
+  // 点当前列切换升/降序；点别的列从升序开始
+  sortDesc = th.dataset.sort === sortBy ? !sortDesc : false;
+  sortBy = th.dataset.sort;
+  onFormChange();
+}));
 // 场馆列说明：点「?」图标弹/收说明，点别处收起
 $("venueHelp").onclick = (e) => { e.stopPropagation(); $("venuePop").classList.toggle("show"); };
 document.addEventListener("click", (e) => { if (!e.target.closest(".helpwrap")) $("venuePop").classList.remove("show"); });
@@ -409,6 +391,7 @@ function pollRefresh() {
   tick();
 }
 $("refreshBtn").onclick = async () => {
+  if (!confirm("刷新球局要逐页拉取中羽联和闪动，可能需要十几分钟（中羽联较慢）。\n期间可以正常使用页面。是否继续？")) return;
   $("refreshBtn").disabled = true;
   $("status").textContent = "刷新球局中…";
   $("status").className = "";
@@ -427,7 +410,9 @@ async function startCompute(baseMsg) {
     else { $("status").textContent = "通勤无需计算"; $("commuteBtn").disabled = false; }
   } catch (e) { $("status").textContent = "算通勤失败：" + e; $("commuteBtn").disabled = false; }
 }
-$("commuteBtn").onclick = () => startCompute("");
+$("commuteBtn").onclick = () => {
+  if (confirm("算通勤会给新场馆归类并调用高德计算通勤，可能需要几分钟，会消耗高德额度。\n已算过的场馆走缓存，不会重复计算。是否继续？")) startCompute("");
+};
 
 $("capBtn").onclick = async () => {
   $("status").textContent = "抓取中：请在桌面微信里打开对应小程序刷一下列表…";

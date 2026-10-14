@@ -18,9 +18,9 @@ def create_app(conn, config, db_path=None):
     def index():
         return send_from_directory("static", "index.html")
 
-    @app.get("/filters.js")
-    def filters_js():  # 页面 <script src="filters.js"> 依赖此路由（static_folder=None）
-        return send_from_directory("static", "filters.js")
+    @app.get("/static/<path:p>")
+    def static_file(p):  # 页面引用的 css/js（static_folder=None，统一走这里）
+        return send_from_directory("static", p)
 
     @app.get("/api/games")
     def games():

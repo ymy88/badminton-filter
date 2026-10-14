@@ -7,6 +7,17 @@ function startMinutes(t) {
   return h * 60 + m;
 }
 
+// tags 格式不定：JSON 数组 → 标签；其它非空字符串 → 单个标签；空/异常 → 无
+function parseTags(t) {
+  if (!t) return [];
+  try {
+    const v = JSON.parse(t);
+    if (Array.isArray(v)) return v.map(String).filter(Boolean);
+    if (typeof v === "string" && v) return [v];
+    return [];
+  } catch (e) { return [String(t)]; }
+}
+
 // 关键字/场馆双向匹配：include 命中任一即保留，exclude 命中任一即剔除；空数组/空串跳过
 function textHit(text, list) {
   return list.some((s) => s && text.includes(s));
@@ -17,6 +28,7 @@ function applyFilters(games, criteria) {
   const c = criteria;
   return games.filter((g) => {
     if (c.date && g.date !== c.date) return false;
+    if (c.source && g.source !== c.source) return false;
 
     if (c.startMin != null || c.startMax != null) {
       const s = startMinutes(g.start_time);
@@ -63,24 +75,25 @@ function applyFilters(games, criteria) {
   });
 }
 
-// 排序取值表：by → 取数值的函数（全为数值，null/缺失统一排最后）
-// 对应设计文档排序键：开始时间/通勤/价格/剩余空位(总−已报)/已报名
+// 排序取值表：by → 取值函数（数值或字符串，null/空串统一排最后）
 function sortKey(by, mode) {
   switch (by) {
     case "commute_home": return (g) => g.commute?.home?.[mode];
     case "commute_company": return (g) => g.commute?.company?.[mode];
     case "start_time": return (g) => startMinutes(g.start_time);
     case "price": return (g) => g.price;
-    case "open": return (g) =>
-      g.total_num != null && g.applied_num != null ? g.total_num - g.applied_num : null;
     case "applied": return (g) => g.applied_num;
     case "club": return (g) => g.club_name;  // 字符串排序
+    case "duration": return (g) => g.duration_min;
+    case "venue": return (g) => g.canonical_name || g.venue_name;  // 按统一名，同一球馆两平台排在一起
+    case "source": return (g) => g.source;
+    case "tags": return (g) => parseTags(g.tags).join(" ");
     default: return null;
   }
 }
 
-// 按 by 升序；缺失值排最后。返回新数组，不改入参；未知 by 原样返回副本
-function sortGames(games, by, mode) {
+// 按 by 排序（desc 为降序）；缺失值无论升降都排最后。返回新数组，不改入参；未知 by 原样返回副本
+function sortGames(games, by, mode, desc = false) {
   const out = games.slice();
   const key = sortKey(by, mode);
   if (!key) return out;
@@ -90,8 +103,9 @@ function sortGames(games, by, mode) {
     if (isNull(x) && isNull(y)) return 0;
     if (isNull(x)) return 1;
     if (isNull(y)) return -1;
-    return (typeof x === "string" || typeof y === "string")
-      ? String(x).localeCompare(String(y), "zh") : x - y;  // 字符串(俱乐部)按中文排序
+    const r = (typeof x === "string" || typeof y === "string")
+      ? String(x).localeCompare(String(y), "zh") : x - y;  // 字符串按中文排序
+    return desc ? -r : r;
   });
   return out;
 }
@@ -103,4 +117,4 @@ function pyMatch(text, q, py) {
   return !!py && /^[a-z0-9]+$/.test(l) && (py[0].includes(l) || py[1].includes(l));
 }
 
-if (typeof module !== "undefined") module.exports = { applyFilters, sortGames, pyMatch };
+if (typeof module !== "undefined") module.exports = { applyFilters, sortGames, pyMatch, parseTags };

@@ -1,6 +1,6 @@
 // 前端筛选纯函数自测：node tests/filters.test.js
 const assert = require("assert");
-const { applyFilters, sortGames, pyMatch } = require("../static/filters.js");
+const { applyFilters, sortGames, pyMatch, parseTags } = require("../static/filters.js");
 
 const g = (o) => Object.assign({
   date: "2026-10-11", start_time: "19:00", duration_min: 120,
@@ -73,9 +73,6 @@ assert.equal(sortGames([g({ source_id: "a", start_time: "20:00" }), g({ source_i
 // 排序：价格升序
 assert.equal(sortGames([g({ source_id: "a", price: 50 }), g({ source_id: "b", price: 10 })],
   "price")[0].source_id, "b");
-// 排序：剩余空位升序（总−已报 小的在前）
-assert.equal(sortGames([g({ source_id: "a", applied_num: 2, total_num: 12 }), g({ source_id: "b", applied_num: 11, total_num: 12 })],
-  "open")[0].source_id, "b");
 // 排序：已报名升序
 assert.equal(sortGames([g({ source_id: "a", applied_num: 9 }), g({ source_id: "b", applied_num: 1 })],
   "applied")[0].source_id, "b");
@@ -83,11 +80,10 @@ assert.equal(sortGames([g({ source_id: "a", applied_num: 9 }), g({ source_id: "b
 const sc = sortGames([g({ source_id: "a", club_name: "乙俱乐部" }), g({ source_id: "b", club_name: "甲俱乐部" }), g({ source_id: "c", club_name: null })], "club");
 assert.equal(sc[0].source_id, "b");
 assert.equal(sc[2].source_id, "c");
-// 排序：缺失值排最后（price/start_time/open/applied 各一例，验证共用比较器）
+// 排序：缺失值排最后（price/start_time/applied 各一例，验证共用比较器）
 const sn = sortGames([g({ source_id: "a", price: null }), g({ source_id: "b", price: 10 })], "price");
 assert.equal(sn[0].source_id, "b"); assert.equal(sn[1].source_id, "a");
 assert.equal(sortGames([g({ source_id: "a", start_time: null }), g({ source_id: "b", start_time: "08:00" })], "start_time")[1].source_id, "a");
-assert.equal(sortGames([g({ source_id: "a", total_num: null }), g({ source_id: "b", applied_num: 1, total_num: 12 })], "open")[1].source_id, "a");
 assert.equal(sortGames([g({ source_id: "a", applied_num: null }), g({ source_id: "b", applied_num: 1 })], "applied")[1].source_id, "a");
 // sortGames 不改入参；未知 by 返回副本
 const inp = [g({ source_id: "a" })]; sortGames(inp, "price"); assert.equal(inp[0].source_id, "a");
@@ -107,3 +103,18 @@ assert.ok(pyMatch("万体汇", "WTH", py));
 assert.ok(!pyMatch("万体汇", "xyz", py));
 assert.ok(!pyMatch("万体汇", "wth", undefined));
 assert.ok(pyMatch("万体汇", "", py));
+
+// 来源筛选
+assert.equal(applyFilters([g({ source: "flashx" }), g({ source: "zhongyulian" })], { source: "flashx" }).length, 1);
+assert.equal(applyFilters([g({ source: "flashx" }), g({ source: "zhongyulian" })], { source: null }).length, 2);
+
+// 新增排序列：时长数值、场馆按统一名（无则原名）、标签空排最后
+const ids = (arr) => arr.map((x) => x.id).join();
+assert.equal(ids(sortGames([g({ id: "a", duration_min: 180 }), g({ id: "b", duration_min: null }), g({ id: "c", duration_min: 60 })], "duration")), "c,a,b");
+assert.equal(ids(sortGames([g({ id: "a", venue_name: "乙", canonical_name: "甲馆" }), g({ id: "b", venue_name: "阿" })], "venue")), "b,a");
+assert.equal(ids(sortGames([g({ id: "a", tags: "[]" }), g({ id: "b", tags: '["新手局"]' })], "tags")), "b,a");
+assert.deepEqual(parseTags('["a",""]'), ["a"]);
+
+// 降序：值倒过来，缺失值仍排最后
+assert.equal(ids(sortGames([g({ id: "a", price: 10 }), g({ id: "b", price: null }), g({ id: "c", price: 50 })], "price", null, true)), "c,a,b");
+assert.equal(ids(sortGames([g({ id: "a", club_name: "甲" }), g({ id: "b", club_name: "" }), g({ id: "c", club_name: "乙" })], "club", null, true)), "c,a,b");

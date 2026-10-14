@@ -1,0 +1,93 @@
+/* app.css —— 全站共用样式：设计变量 → 原生元素默认样式 → 少量变体与共用控件。
+   页面特有的布局写在各页面自己的 <style> 里，颜色/圆角一律引用这里的变量。 */
+
+/* ---- 1. 设计变量 ---- */
+:root {
+  --c-text: #1f2329;
+  --c-muted: #8a919f;
+  --c-bg: #f3f4f7;
+  --c-surface: #fff;
+  --c-surface-2: #f8f9fb;   /* 次级底色：展开详情、表头 */
+  --c-border: #d9dde4;
+  --c-line: #eceef2;        /* 表格分隔线 */
+  --c-primary: #3b6cf6;
+  --c-primary-hover: #2f5bd8;
+  --c-primary-soft: #e6edff;
+  --c-hover: #f5f8ff;       /* 行/选项悬停 */
+  --c-ok: #1a8a3a;
+  --c-danger: #d33a3a;
+  --c-warn-bg: #fff4d6;
+  --c-bad-bg: #fde8e8;
+
+  --radius: 6px;
+  --radius-pill: 999px;
+  --gap: 8px;
+  --fs: 14px;
+  --fs-sm: 12px;
+  --shadow: 0 2px 8px rgba(20, 30, 50, .12);
+  --font: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+}
+
+/* ---- 2. 原生元素默认样式 ---- */
+* { box-sizing: border-box; }
+body { margin: 0; font: var(--fs)/1.5 var(--font); color: var(--c-text); background: var(--c-bg); }
+
+button {
+  font: inherit; color: var(--c-text); background: var(--c-surface);
+  border: 1px solid var(--c-border); border-radius: var(--radius);
+  padding: 4px 12px; cursor: pointer;
+  &:hover:not(:disabled) { border-color: var(--c-primary); color: var(--c-primary); }
+  &:disabled { opacity: .5; cursor: default; }
+}
+
+input:not([type=checkbox], [type=radio]), select {
+  font: inherit; font-size: 13px; color: var(--c-text); background: var(--c-surface);
+  border: 1px solid var(--c-border); border-radius: var(--radius);
+  padding: 3px 6px; height: 28px;
+  &:focus { outline: none; border-color: var(--c-primary); box-shadow: 0 0 0 2px var(--c-primary-soft); }
+}
+input[type=checkbox], input[type=radio] { accent-color: var(--c-primary); margin: 0 4px 0 0; vertical-align: -2px; }
+label { cursor: pointer; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--c-line); text-align: left; vertical-align: top; }
+th { font-weight: 600; color: var(--c-muted); font-size: 13px; white-space: nowrap; }
+
+/* ---- 3. 变体与工具类 ---- */
+button.primary {
+  background: var(--c-primary); border-color: var(--c-primary); color: #fff;
+  &:hover:not(:disabled) { background: var(--c-primary-hover); color: #fff; }
+}
+button.danger { color: var(--c-danger); }
+.muted { color: var(--c-muted); }
+.ok { color: var(--c-ok); }
+.err { color: var(--c-danger); }
+.nowrap { white-space: nowrap; }
+.card { background: var(--c-surface); border-radius: var(--radius); }
+.tag {
+  display: inline-block; padding: 0 6px; margin: 0 3px 2px 0; font-size: var(--fs-sm);
+  background: var(--c-primary-soft); border-radius: var(--radius-pill); white-space: nowrap;
+}
+
+/* ---- 4. 共用控件：胶囊多选（makeChips） ---- */
+.chipbox {
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 3px;
+  min-height: 28px; min-width: 180px; padding: 2px 4px; cursor: text;
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius);
+  &:focus-within { border-color: var(--c-primary); box-shadow: 0 0 0 2px var(--c-primary-soft); }
+  & input:not([type]) { border: none; box-shadow: none; flex: 1; min-width: 50px; height: 22px; padding: 0 2px; background: transparent; }
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px;
+  font-size: var(--fs-sm); background: var(--c-primary-soft); border-radius: var(--radius-pill);
+  & b { cursor: pointer; color: var(--c-muted); font-weight: normal; }
+  & b:hover { color: var(--c-danger); }
+}
+.dd {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin-top: 2px;
+  max-height: 220px; overflow: auto;
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  & div { padding: 4px 8px; cursor: pointer; font-size: 13px; }
+  & div:hover { background: var(--c-hover); }
+}
