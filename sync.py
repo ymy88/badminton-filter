@@ -8,9 +8,17 @@ _COLS = ("source", "source_id", "title", "date", "start_time", "end_time", "dura
          "venue_name", "venue_key", "canonical_id", "price", "applied_num", "total_num",
          "lat", "lng", "raw_text", "tags", "organizer", "club_name", "detail_ref")
 
+_KEEP = ("canonical_id", "lat", "lng")  # 「算通勤」补上的场馆归类/坐标，平台解析结果里没有
+
 def upsert_games(conn, games):
-    q = (f"INSERT OR REPLACE INTO games({','.join(_COLS)}) "
-         f"VALUES ({','.join('?' * len(_COLS))})")
+    # 已有行按 (source, source_id) 更新；新值为空且场馆没变时保留 _KEEP 旧值，
+    # 否则刷新会清空归类，通勤缓存键(c:<canonical_id>)对不上而显示未知
+    sets = ",".join(
+        f"{c}=CASE WHEN excluded.{c} IS NULL AND excluded.venue_key IS games.venue_key"
+        f" THEN games.{c} ELSE excluded.{c} END" if c in _KEEP else f"{c}=excluded.{c}"
+        for c in _COLS if c not in ("source", "source_id"))
+    q = (f"INSERT INTO games({','.join(_COLS)}) VALUES ({','.join('?' * len(_COLS))}) "
+         f"ON CONFLICT(source, source_id) DO UPDATE SET {sets}")
     conn.executemany(q, [tuple(g.get(c) for c in _COLS) for g in games])
     conn.execute("DELETE FROM games WHERE date < ?", (date.today().isoformat(),))
     conn.commit()

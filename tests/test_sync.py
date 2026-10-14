@@ -197,3 +197,15 @@ def test_seed_canonical_idempotent():
     lst = sync.load_canonical_list(conn)
     assert len(lst) == 1 and lst[0]["id"] == rows[0]["id"] and lst[0]["lat"] == 9.0
     assert lst[0]["name_patterns"] == ["A"]
+
+def test_upsert_keeps_enriched_venue_fields():
+    # 刷新入库不能清掉「算通勤」补上的 canonical_id/坐标（否则通勤缓存键对不上，显示未知）
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    base = _g(source="zhongyulian", source_id="1", venue_key="zhongyulian:9", lat=None, lng=None)
+    sync.upsert_games(conn, [dict(base, canonical_id=5, lat=31.1, lng=121.5)])  # 算通勤后的状态
+    sync.upsert_games(conn, [dict(base, applied_num=8)])                        # 再刷新：解析结果不带这些
+    r = conn.execute("SELECT canonical_id,lat,lng,applied_num FROM games").fetchone()
+    assert (r["canonical_id"], r["lat"], r["lng"], r["applied_num"]) == (5, 31.1, 121.5, 8)
+    sync.upsert_games(conn, [dict(base, venue_key="zhongyulian:10")])           # 换了场馆 → 旧归类作废
+    r = conn.execute("SELECT canonical_id,lat FROM games").fetchone()
+    assert r["canonical_id"] is None and r["lat"] is None
