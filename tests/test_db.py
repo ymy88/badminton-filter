@@ -20,6 +20,8 @@ def test_alias_origin_checked_and_amap_name_unique():
     conn = db.connect(":memory:"); db.init_schema(conn)
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO venue_aliases(platform_name_norm,origin) VALUES('x','bogus')")
-    conn.execute("INSERT INTO canonical_venues(amap_name,amap_id) VALUES('馆','B1')")
+    conn.execute("INSERT INTO canonical_venues(amap_name,amap_id,lat,lng) VALUES('馆','B1',31.0,121.0)")
     with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("INSERT INTO canonical_venues(amap_name,amap_id) VALUES('馆','B2')")
+        conn.execute("INSERT INTO canonical_venues(amap_name,amap_id,lat,lng) VALUES('馆','B2',31.0,121.0)")
+    with pytest.raises(sqlite3.IntegrityError):  # 统一球场必来自高德 POI，必有坐标
+        conn.execute("INSERT INTO canonical_venues(amap_name,amap_id) VALUES('无坐标','B3')")

@@ -74,11 +74,13 @@ const mapLink = (name, lat, lng) => lat == null ? "" :
   ` <a href="https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}" target="_blank" rel="noopener">地图</a>`;
 // updated_at 是 SQLite datetime('now')（UTC）→ 本地时间
 const localTime = (t) => new Date(t.replace(" ", "T") + "Z").toLocaleString("zh-CN", { hour12: false });
-const isTodo = (v) => v.origin === "pending" || v.suspect.length > 0;
+// 待处理：还有球局的未归类（球局已过期的不再归类，不催）+ 可疑的自动归类
+const isTodo = (v) => (v.origin === "pending" && v.game_count > 0) || v.suspect.length > 0;
 
 function status(v) {
   if (v.origin === "pending")
-    return `<span class="st pending">未归类</span><span class="why">${v.updated_at ? "上次搜索失败 " + esc(localTime(v.updated_at)) : "还没搜索（点主页「算通勤」）"}</span>`;
+    return `<span class="st pending">未归类</span><span class="why">${!v.game_count ? "已无球局，不再自动搜索"
+      : v.updated_at ? "上次搜索失败 " + esc(localTime(v.updated_at)) : "还没搜索（点主页「算通勤」）"}</span>`;
   if (v.origin === "auto" && v.suspect.length)
     return `<span class="st suspect">自动·可疑</span>${v.suspect.map((s) => `<span class="why">${esc(s)}</span>`).join("")}`;
   const label = { auto: "自动", confirmed: "已确认", manual: "手动", none: "高德搜不到" }[v.origin];
@@ -204,8 +206,10 @@ $("tbody").addEventListener("click", (e) => {
     assign(norm, { poi: { amap_id: p.amap_id, name: p.name, lat: p.lat, lng: p.lng } }, p.name);
   }
 });
-document.querySelectorAll("input[name=view]").forEach((el) => el.addEventListener("change", render));
-$("q").addEventListener("input", render);
+// 换视图/搜索时关掉编辑区：否则重绘恢复编辑区会抢走搜索框焦点、清掉编辑中的内容
+const rerender = () => { editing = null; render(); };
+document.querySelectorAll("input[name=view]").forEach((el) => el.addEventListener("change", rerender));
+$("q").addEventListener("input", rerender);
 
 load().catch((e) => { $("status").className = "err"; $("status").textContent = "加载失败：" + e.message; });
 </script>

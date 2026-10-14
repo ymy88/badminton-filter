@@ -58,8 +58,8 @@ def classify_pending(conn, progress=lambda msg: None):
 
 def commute_places(conn):
     # 需要通勤的场馆 → 高德坐标串 "lng,lat"：
-    # 已归类 → 统一球场的高德坐标（c:<id>）；未归类但有闪动坐标 → 闪动坐标（v:<venue_key>）；
-    # 中羽联未归类没有坐标（中羽联坐标不可信），不算
+    # 已归类 → 统一球场的高德坐标（c:<id>）；未归类的闪动场馆 → 闪动坐标（v:<venue_key>）；
+    # 中羽联未归类不算（中羽联坐标不可信，games.lat 里即使有遗留值也不用）
     places = {}
     for r in conn.execute(
             "SELECT DISTINCT c.id, c.lat, c.lng FROM games g"
@@ -69,7 +69,7 @@ def commute_places(conn):
     for r in conn.execute(
             "SELECT g.venue_key, g.lat, g.lng FROM games g"
             " LEFT JOIN venue_aliases a ON a.platform_name_norm = g.platform_name_norm"
-            " WHERE a.canonical_id IS NULL AND g.lat IS NOT NULL AND g.lng IS NOT NULL"):
+            " WHERE a.canonical_id IS NULL AND g.source = 'flashx' AND g.lat IS NOT NULL AND g.lng IS NOT NULL"):
         places.setdefault(commute.place_key(None, r["venue_key"]), commute.amap_coord(r["lat"], r["lng"]))
     return places
 

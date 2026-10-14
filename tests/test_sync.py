@@ -163,7 +163,7 @@ def test_commute_places_uses_amap_coords_flashx_fallback_skips_zyl():
     conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(3,'甲','B3',31.0,121.0)")
     sync.upsert_games(conn, [_g(source_id="1", venue_name="甲", lat=31.9, lng=121.9),       # 已归类：用高德坐标
                              _g(source_id="2", venue_name="乙", venue_key="flashx:2", lat=31.5, lng=121.5),  # 闪动未归类
-                             _g(source="zhongyulian", source_id="3", venue_name="丙", venue_key="zhongyulian:3", lat=None, lng=None)])
+                             _g(source="zhongyulian", source_id="3", venue_name="丙", venue_key="zhongyulian:3", lat=31.7, lng=121.7)])  # 中羽联坐标即使有也不用
     conn.execute("UPDATE venue_aliases SET origin='auto', canonical_id=3 WHERE platform_name_norm='甲'")
     assert sync.commute_places(conn) == {"c:3": "121.0,31.0", "v:flashx:2": "121.5,31.5"}
 

@@ -41,7 +41,9 @@ def create_app(conn, config, db_path=None):
         out = []
         for r in rows:
             g = dict(r)
-            pk = commute.place_key(g["canonical_id"], g["venue_key"])
+            # 未归类：只有闪动场馆用自带坐标算过通勤；中羽联坐标不可信，通勤一律未知
+            pk = commute.place_key(g["canonical_id"], g["venue_key"]) \
+                if g["canonical_id"] or g["source"] == "flashx" else None
             g["commute"] = {o: cm.get((o, pk)) for o in ORIGINS}
             out.append(g)
         return jsonify({"games": out})
@@ -123,6 +125,7 @@ def create_app(conn, config, db_path=None):
             try:
                 cid = sync.canonical_for_poi(conn, poi)
             except sqlite3.IntegrityError:
+                conn.rollback()  # 失败的 INSERT 已隐式开事务并拿写锁，不收掉会卡住后台线程的写入
                 return jsonify({"ok": False, "msg": f"高德名「{poi['name']}」与已有统一球场重名"}), 409
         else:
             return jsonify({"ok": False, "msg": "需要 canonical_id 或 poi{amap_id,name,lat,lng}"}), 400

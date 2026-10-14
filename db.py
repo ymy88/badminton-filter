@@ -22,7 +22,8 @@ def init_schema(conn):
       organizer TEXT, club_name TEXT, detail_ref TEXT,
       UNIQUE(source, source_id));
     CREATE TABLE IF NOT EXISTS canonical_venues(
-      id INTEGER PRIMARY KEY, amap_name TEXT UNIQUE, amap_id TEXT UNIQUE, lat REAL, lng REAL);
+      id INTEGER PRIMARY KEY, amap_name TEXT UNIQUE, amap_id TEXT UNIQUE,
+      lat REAL NOT NULL, lng REAL NOT NULL);  -- 统一球场必来自高德 POI，必有坐标
     CREATE TABLE IF NOT EXISTS venue_aliases(
       platform_name_norm TEXT PRIMARY KEY,
       canonical_id INTEGER REFERENCES canonical_venues(id),

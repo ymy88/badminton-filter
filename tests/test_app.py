@@ -251,6 +251,7 @@ def test_assign_errors():
     bad = {"amap_id": "B9", "name": "万体汇", "lat": 31.0, "lng": 121.0}  # 与已有统一球场同名不同 id
     r = c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "poi": bad})
     assert r.status_code == 409 and _row(c, "野馆")["origin"] == "pending"
+    assert not conn.in_transaction  # 409 后必须回滚，否则主连接占着写锁，后台刷新/算通勤写不进
     assert c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "poi": dict(bad, lat="x")}).status_code == 400
 
 def test_confirm_none_reset():
@@ -274,3 +275,14 @@ def test_amap_search(monkeypatch):
     assert c.get("/api/amap/search?q= 堂颂 ").get_json() == {"pois": [{"amap_id": "B1"}]}
     assert seen == {"q": "堂颂", "limit": 10}
     assert c.get("/api/amap/search?q=").status_code == 400
+
+def test_games_zyl_unclassified_has_no_commute_even_with_stale_cache():
+    # 中羽联坐标不可信：未归到统一球场的中羽联球局通勤一律未知（旧地理编码留下的 v: 缓存也不用）
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO games(source,source_id,date,venue_key,platform_name_norm) VALUES('zhongyulian','1','2999-01-01','zhongyulian:9','野馆')")
+    conn.execute("INSERT INTO venue_aliases VALUES('野馆',NULL,'none',NULL)")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:zhongyulian:9',15,30,900)")
+    conn.commit()
+    g = appmod.create_app(conn, {}).test_client().get("/api/games").get_json()["games"][0]
+    assert g["commute"] == {"home": None, "company": None}
+
