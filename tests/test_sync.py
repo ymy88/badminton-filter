@@ -4,7 +4,7 @@ import db, sync
 def _g(**kw):
     base = dict(source="flashx", source_id="1", title="t", date="2999-01-01",  # 远期，避开 upsert 清理过期
                 start_time="19:00", end_time="21:00", duration_min=120,
-                venue_name="馆", venue_key="flashx:1", canonical_id=None,
+                venue_name="馆", venue_key="flashx:1",
                 price=30.0, applied_num=0, total_num=12, lat=31.1, lng=121.5,
                 raw_text="t", tags="[]", organizer="o", club_name="c", detail_ref="1")
     base.update(kw); return base
@@ -28,86 +28,6 @@ def test_same_source_id_different_source():
     sync.upsert_games(conn, [_g(source="zhongyulian", source_id="1"), _g(source="flashx", source_id="1")])
     assert conn.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 2
 
-def _canon(**kw):
-    base = dict(id=1, canonical_name="万体", lat=None, lng=None,
-                name_patterns=["万体"], platform_ids=[]); base.update(kw); return [base]
-
-def test_enrich_keeps_game_coords_when_canonical_has_no_coords(monkeypatch):
-    # #2 回归：归到无坐标规范馆时，不能用 None 抹掉球局自带坐标，通勤要能算出
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 20, "transit_min": 35})
-    g = _g(venue_name="万体汇", lat=31.1, lng=121.5)
-    sync.enrich_venue(conn, g, _canon(), {"home": "121.4,31.2"})
-    assert g["canonical_id"] == 1 and g["lat"] == 31.1  # 自带坐标保留
-    pk = sync.commute.place_key(1, g["venue_key"])
-    row = conn.execute("SELECT drive_min FROM commute WHERE origin='home' AND place_key=?", (pk,)).fetchone()
-    assert row and row["drive_min"] == 20  # 通勤没被跳过
-
-def test_enrich_uses_canonical_coords_when_present(monkeypatch):
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 1, "transit_min": 2})
-    g = _g(venue_name="万体汇", lat=31.1, lng=121.5)
-    sync.enrich_venue(conn, g, _canon(lat=30.0, lng=120.0), {"home": "121.4,31.2"})
-    assert (g["lat"], g["lng"]) == (30.0, 120.0)  # 规范馆有坐标则用它
-
-def test_enrich_route_fail_writes_no_commute(monkeypatch):
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "poi_search", lambda n: None)  # 用球局自带坐标，不走网络
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": None, "transit_min": None})
-    sync.enrich_venue(conn, _g(lat=31.1, lng=121.5), [], {"home": "121.4,31.2"})
-    assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 0  # 完全失败不缓存
-
-def test_enrich_geocodes_unclassified_without_coords(monkeypatch):
-    # 中羽联无自带坐标、未归类、且 POI 也搜不到 → 退回按馆名地理编码后算通勤
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "poi_search", lambda name: None)
-    monkeypatch.setattr(sync.commute, "geocode", lambda name: (31.5, 121.5))
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 9, "transit_min": None})
-    g = _g(source="zhongyulian", venue_key="zyl:5", venue_name="某馆", lat=None, lng=None)
-    sync.enrich_venue(conn, g, [], {"home": "121.4,31.2"})
-    assert g["lat"] == 31.5
-    assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 1
-
-def test_auto_canonical_creates_from_poi(monkeypatch):
-    # 未匹配 → 高德 POI 搜索结果名作为统一球场名，自动建规范馆
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "poi_search",
-                        lambda n: {"amap_id": "B1", "name": "徐家汇体育公园", "lat": 31.18, "lng": 121.43})
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 15, "transit_min": 25})
-    g = _g(venue_name="万体汇", venue_key="flashx:9", lat=31.1, lng=121.5)
-    sync.enrich_venue(conn, g, [], {"home": "121.4,31.2"})
-    row = conn.execute("SELECT * FROM canonical_venues").fetchone()
-    assert row["canonical_name"] == "徐家汇体育公园" and row["amap_id"] == "B1"
-    assert g["canonical_id"] == row["id"] and (g["lat"], g["lng"]) == (31.18, 121.43)
-    assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 1
-
-def test_auto_canonical_dedups_cross_platform_by_amap_id(monkeypatch):
-    # 两平台不同叫法搜到同一 POI → 归并到同一规范馆
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "poi_search",
-                        lambda n: {"amap_id": "B1", "name": "徐家汇体育公园", "lat": 31.18, "lng": 121.43})
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 15, "transit_min": 25})
-    canon = []
-    g1 = _g(source="flashx", venue_name="万体汇", venue_key="flashx:9", lat=31.1, lng=121.5)
-    g2 = _g(source="zhongyulian", venue_name="徐家汇体育公园综合馆", venue_key="zyl:3", lat=None, lng=None)
-    sync.enrich_venue(conn, g1, canon, {"home": "121.4,31.2"})
-    sync.enrich_venue(conn, g2, canon, {"home": "121.4,31.2"})
-    assert conn.execute("SELECT COUNT(*) FROM canonical_venues").fetchone()[0] == 1
-    assert g1["canonical_id"] == g2["canonical_id"]
-    pats = json.loads(conn.execute("SELECT name_patterns FROM canonical_venues").fetchone()["name_patterns"])
-    assert "万体汇" in pats and "徐家汇体育公园综合馆" in pats
-
-def test_auto_canonical_poi_miss_falls_back_to_game_coords(monkeypatch):
-    # POI 搜不到 → 不建规范馆，用球局自带坐标照常算通勤
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    monkeypatch.setattr(sync.commute, "poi_search", lambda n: None)
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 7, "transit_min": None})
-    g = _g(venue_name="野鸡馆", venue_key="flashx:77", lat=31.1, lng=121.5)
-    sync.enrich_venue(conn, g, [], {"home": "121.4,31.2"})
-    assert g["canonical_id"] is None
-    assert conn.execute("SELECT COUNT(*) FROM canonical_venues").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 1
-
 def test_refresh_no_creds_reports_auth_failed():
     # 没凭证时不能静默返回 0，要把平台计入 auth_failed，界面才会提示去抓取
     conn = db.connect(":memory:"); db.init_schema(conn)
@@ -125,22 +45,6 @@ def test_refresh_stores_games_without_computing_commute(monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM commute").fetchone()[0] == 0
 
-def test_compute_pending_fills_commute(tmp_path, monkeypatch):
-    # 后台任务：自开连接给缺通勤的球局补算
-    p = str(tmp_path / "t.db")
-    conn = db.connect(p); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.2,121.4)")
-    conn.execute("INSERT INTO games(source,source_id,venue_name,venue_key,canonical_id,lat,lng,date)"
-                 " VALUES('flashx','1','馆','flashx:1',NULL,31.1,121.5,'2999-01-01')")
-    conn.commit(); conn.close()
-    monkeypatch.setattr(sync.commute, "poi_search", lambda n: None)
-    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 18, "transit_min": 30})
-    prog = []
-    sync.compute_pending(p, {}, progress=lambda *a: prog.append(a))
-    conn = db.connect(p)
-    assert conn.execute("SELECT drive_min FROM commute").fetchone()["drive_min"] == 18
-    assert prog == [("归类球局场馆 1/1",), ("算各场馆通勤 1/1",)]
-
 def test_refresh_progress_per_request(monkeypatch):
     # 每发完一个请求报一次进度：第几天 + 已翻页数
     conn = db.connect(":memory:"); db.init_schema(conn)
@@ -154,19 +58,6 @@ def test_refresh_progress_per_request(monkeypatch):
     sync.refresh(conn, {"flashx": {"x": 1}, "zhongyulian": {"x": 1}}, {}, progress=prog.append)
     assert prog[:2] == ["中羽联 第 1/3 天 · 已翻 1 页", "中羽联 第 1/3 天 · 已翻 2 页"]
     assert len(prog) == 12 and prog[-1] == "闪动 第 3/3 天 · 已翻 2 页"
-
-def test_pending_count_counts_unresolved_and_missing_commute():
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','x',31.0,121.0)")
-    # v1 无坐标（POI/geocode 都失败）
-    conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,date) VALUES('flashx','1','v1',NULL,NULL,'2999-01-01')")
-    # v2 有坐标但无通勤（route 失败）
-    conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,lng,date) VALUES('flashx','2','v2',NULL,31.1,121.5,'2999-01-01')")
-    # v3 有坐标且通勤齐（驾车/公交/步行都有）
-    conn.execute("INSERT INTO games(source,source_id,venue_key,canonical_id,lat,lng,date) VALUES('flashx','3','v3',NULL,31.2,121.6,'2999-01-01')")
-    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:v3',10,20,500)")
-    conn.commit()
-    assert sync.pending_count(conn) == 2  # v1 + v2；v3 齐全不计
 
 def test_ensure_commute_retries_incomplete_and_merges(monkeypatch):
     # 部分路线上次失败（行在但字段缺）→ 下次重算补齐，已成功的字段保留；三项齐全后不再调
@@ -185,27 +76,119 @@ def test_ensure_commute_retries_incomplete_and_merges(monkeypatch):
                         lambda o, d: (_ for _ in ()).throw(AssertionError("齐全不该再算")))
     sync._ensure_commute(conn, "v:x", "121,31", {"home": "121.5,31.2"})  # 齐全 → 不调用
 
-def test_seed_canonical_idempotent():
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    cfg = {"canonical_venues": [{"canonical_name": "A馆", "lat": 1.0, "lng": 2.0,
-                                 "name_patterns": ["A"], "platform_ids": []}]}
-    sync.seed_canonical_venues(conn, cfg); sync.seed_canonical_venues(conn, cfg)
-    rows = conn.execute("SELECT id FROM canonical_venues").fetchall()
-    assert len(rows) == 1
-    cfg["canonical_venues"][0]["lat"] = 9.0
-    sync.seed_canonical_venues(conn, cfg)
-    lst = sync.load_canonical_list(conn)
-    assert len(lst) == 1 and lst[0]["id"] == rows[0]["id"] and lst[0]["lat"] == 9.0
-    assert lst[0]["name_patterns"] == ["A"]
+# ---- 馆名对应表 / 归类 / 通勤场馆 ----
 
-def test_upsert_keeps_enriched_venue_fields():
-    # 刷新入库不能清掉「算通勤」补上的 canonical_id/坐标（否则通勤缓存键对不上，显示未知）
+POI = {"amap_id": "B1", "name": "徐家汇体育公园", "lat": 31.18, "lng": 121.43, "district": "徐汇区", "address": ""}
+
+def _alias(conn, norm):
+    return conn.execute("SELECT * FROM venue_aliases WHERE platform_name_norm=?", (norm,)).fetchone()
+
+def test_upsert_records_norm_and_pending_alias():
     conn = db.connect(":memory:"); db.init_schema(conn)
-    base = _g(source="zhongyulian", source_id="1", venue_key="zhongyulian:9", lat=None, lng=None)
-    sync.upsert_games(conn, [dict(base, canonical_id=5, lat=31.1, lng=121.5)])  # 算通勤后的状态
-    sync.upsert_games(conn, [dict(base, applied_num=8)])                        # 再刷新：解析结果不带这些
-    r = conn.execute("SELECT canonical_id,lat,lng,applied_num FROM games").fetchone()
-    assert (r["canonical_id"], r["lat"], r["lng"], r["applied_num"]) == (5, 31.1, 121.5, 8)
-    sync.upsert_games(conn, [dict(base, venue_key="zhongyulian:10")])           # 换了场馆 → 旧归类作废
-    r = conn.execute("SELECT canonical_id,lat FROM games").fetchone()
-    assert r["canonical_id"] is None and r["lat"] is None
+    sync.upsert_games(conn, [_g(venue_name="堂颂羽毛球馆（淞南店）"), _g(source_id="2", venue_name="")])
+    assert conn.execute("SELECT platform_name_norm FROM games WHERE source_id='1'").fetchone()[0] == "堂颂羽毛球馆(淞南店)"
+    a = _alias(conn, "堂颂羽毛球馆(淞南店)")
+    assert a["origin"] == "pending" and a["canonical_id"] is None and a["updated_at"] is None  # 未搜过
+    assert conn.execute("SELECT COUNT(*) FROM venue_aliases").fetchone()[0] == 1  # 空馆名不记
+
+def test_upsert_keeps_existing_alias_and_overwrites_coords():
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(5,'馆','B5',30.0,120.0)")
+    conn.execute("INSERT INTO venue_aliases VALUES('馆',5,'manual','2026-01-01')")
+    sync.upsert_games(conn, [_g(lat=31.1, lng=121.5)])
+    sync.upsert_games(conn, [_g(lat=31.2, lng=121.6)])  # 再刷新：平台坐标变了 → 用新值
+    assert dict(_alias(conn, "馆"))["origin"] == "manual"
+    assert tuple(conn.execute("SELECT lat,lng FROM games").fetchone()) == (31.2, 121.6)
+
+def test_classify_pending_found_creates_auto_and_searches_once_per_name(monkeypatch):
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    sync.upsert_games(conn, [_g(source_id="1", venue_name="万体汇"), _g(source_id="2", venue_name="万体汇 ")])
+    calls = []
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: calls.append(n) or [POI])
+    prog = []
+    sync.classify_pending(conn, prog.append)
+    a = _alias(conn, "万体汇")
+    assert a["origin"] == "auto" and a["updated_at"] is not None
+    assert conn.execute("SELECT amap_name FROM canonical_venues WHERE id=?", (a["canonical_id"],)).fetchone()[0] == "徐家汇体育公园"
+    assert len(calls) == 1 and prog == ["归类场馆 1/1"]
+
+def test_classify_pending_miss_stays_pending(monkeypatch):
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    sync.upsert_games(conn, [_g()])
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [])
+    sync.classify_pending(conn)
+    a = _alias(conn, "馆")
+    assert a["origin"] == "pending" and a["canonical_id"] is None and a["updated_at"] is not None  # 记下搜过
+
+def test_classify_reuses_existing_amap_id(monkeypatch):
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(7,'徐家汇体育公园','B1',31.18,121.43)")
+    sync.upsert_games(conn, [_g(venue_name="徐家汇体育公园综合馆")])
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [POI])
+    sync.classify_pending(conn)
+    assert _alias(conn, "徐家汇体育公园综合馆")["canonical_id"] == 7
+    assert conn.execute("SELECT COUNT(*) FROM canonical_venues").fetchone()[0] == 1
+
+def test_classify_skips_non_pending(monkeypatch):
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    sync.upsert_games(conn, [_g(source_id=str(i), venue_name=n) for i, n in enumerate(["甲", "乙", "丙"])])
+    conn.execute("UPDATE venue_aliases SET origin='none'")
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: (_ for _ in ()).throw(AssertionError("不该搜")))
+    sync.classify_pending(conn)
+
+def test_classify_does_not_override_manual_set_meanwhile(monkeypatch):
+    # 归类进行中用户在管理页改成了 manual → 自动结果不得覆盖
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(9,'手选馆','B9',31.0,121.0)")
+    sync.upsert_games(conn, [_g()])
+    def search(n, limit=1):
+        conn.execute("UPDATE venue_aliases SET origin='manual', canonical_id=9")
+        return [POI]
+    monkeypatch.setattr(sync.commute, "poi_search", search)
+    sync.classify_pending(conn)
+    a = _alias(conn, "馆")
+    assert a["origin"] == "manual" and a["canonical_id"] == 9
+
+def test_classify_duplicate_amap_name_stays_pending(monkeypatch):
+    # 新 POI 与已有统一球场同名不同 id（唯一约束冲突）→ 留在待处理
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(amap_name,amap_id,lat,lng) VALUES('徐家汇体育公园','B0',31.0,121.0)")
+    sync.upsert_games(conn, [_g()])
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [POI])
+    sync.classify_pending(conn)
+    assert _alias(conn, "馆")["origin"] == "pending"
+
+def test_commute_places_uses_amap_coords_flashx_fallback_skips_zyl():
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(3,'甲','B3',31.0,121.0)")
+    sync.upsert_games(conn, [_g(source_id="1", venue_name="甲", lat=31.9, lng=121.9),       # 已归类：用高德坐标
+                             _g(source_id="2", venue_name="乙", venue_key="flashx:2", lat=31.5, lng=121.5),  # 闪动未归类
+                             _g(source="zhongyulian", source_id="3", venue_name="丙", venue_key="zhongyulian:3", lat=None, lng=None)])
+    conn.execute("UPDATE venue_aliases SET origin='auto', canonical_id=3 WHERE platform_name_norm='甲'")
+    assert sync.commute_places(conn) == {"c:3": "121.0,31.0", "v:flashx:2": "121.5,31.5"}
+
+def test_compute_pending_classifies_then_fills_commute(tmp_path, monkeypatch):
+    p = str(tmp_path / "t.db")
+    conn = db.connect(p); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.2,121.4)")
+    sync.upsert_games(conn, [_g()])
+    conn.close()
+    monkeypatch.setattr(sync.commute, "poi_search", lambda n, limit=1: [POI])
+    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: {"drive_min": 18, "transit_min": 30, "walk_m": 900})
+    prog = []
+    sync.compute_pending(p, {}, progress=prog.append)
+    conn = db.connect(p)
+    cid = _alias(conn, "馆")["canonical_id"]
+    assert conn.execute("SELECT drive_min FROM commute WHERE place_key=?", (f"c:{cid}",)).fetchone()[0] == 18
+    assert prog == ["归类场馆 1/1", "算各场馆通勤 1/1"]
+
+def test_pending_count_counts_pending_names_and_missing_commute():
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','x',31.0,121.0)")
+    sync.upsert_games(conn, [_g(source="zhongyulian", source_id="1", venue_name="未归类", lat=None, lng=None),  # pending
+                             _g(source_id="2", venue_name="缺通勤", venue_key="flashx:2"),                     # 闪动未归类、无通勤
+                             _g(source_id="3", venue_name="齐全", venue_key="flashx:3")])
+    conn.execute("UPDATE venue_aliases SET origin='none' WHERE platform_name_norm IN ('缺通勤','齐全')")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:flashx:3',10,20,500)")
+    assert sync.pending_count(conn) == 2  # 未归类 + 缺通勤；齐全不计
+

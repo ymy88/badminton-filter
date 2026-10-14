@@ -2,8 +2,8 @@ import db, commute, app as appmod
 
 def _app():
     conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO games(source,source_id,title,date,venue_key,canonical_id)"
-                 " VALUES('flashx','1','t','2999-01-01','flashx:1',NULL)")
+    conn.execute("INSERT INTO games(source,source_id,title,date,venue_key,platform_name_norm)"
+                 " VALUES('flashx','1','t','2999-01-01','flashx:1','某馆')")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min)"
                  " VALUES('home',?,20,35)", (commute.place_key(None, "flashx:1"),))
     conn.commit()
@@ -12,10 +12,22 @@ def _app():
 def test_games_endpoint_attaches_commute():
     g = _app().get("/api/games").get_json()["games"][0]
     assert g["source_id"] == "1"
-    assert g["canonical_name"] is None
+    assert g["amap_name"] is None
     assert g["commute"]["home"]["drive_min"] == 20
     assert g["commute"]["home"]["transit_min"] == 35
     assert g["commute"]["company"] is None
+
+def test_games_endpoint_joins_alias_for_amap_name_and_commute():
+    # 归属查询时关联：改 venue_aliases 立即生效，通勤按 c:<canonical_id> 取
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO canonical_venues(id,amap_name,amap_id,lat,lng) VALUES(4,'徐家汇体育公园','B1',31.18,121.43)")
+    conn.execute("INSERT INTO games(source,source_id,date,venue_key,platform_name_norm) VALUES('zhongyulian','1','2999-01-01','zhongyulian:9','万体汇')")
+    conn.execute("INSERT INTO venue_aliases VALUES('万体汇',4,'manual',NULL)")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','c:4',12,30,800)")
+    conn.commit()
+    g = appmod.create_app(conn, {}).test_client().get("/api/games").get_json()["games"][0]
+    assert g["amap_name"] == "徐家汇体育公园" and g["canonical_id"] == 4
+    assert g["commute"]["home"]["drive_min"] == 12
 
 def test_filters_js_is_served():
     # 页面 <script src="/static/filters.js"> 依赖此路由，缺了真机会 404 白屏
@@ -145,14 +157,13 @@ def test_save_origins_geocode_fail_keeps_old(monkeypatch):
 def test_get_origins_and_config():
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.0,121.0)")
-    conn.execute("INSERT INTO canonical_venues(canonical_name) VALUES('馆A')")
     conn.commit()
     c = appmod.create_app(conn, {}).test_client()
     o = c.get("/api/origins").get_json()
     assert o["home"] == {"address": "家", "has_coord": True}
     assert o["company"] == {"address": "", "has_coord": False}
     cfg = c.get("/api/config").get_json()
-    assert cfg["canonical_names"] == ["馆A"]
+    assert "canonical_names" not in cfg
 
 def test_save_origins_unchanged_keeps_commute(monkeypatch):
     conn = db.connect(":memory:"); db.init_schema(conn)

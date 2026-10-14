@@ -7,16 +7,6 @@ FAR_M = 1000    # 闪动坐标与高德坐标相距超过此值(米) → 可疑
 _GENERIC = re.compile("羽毛球|乒乓球|俱乐部|羽球|体育|运动|中心|球馆|场馆|综合|篮球|乒羽|健身|训练|培训"
                       "|基地|公园|社区|上海|旗舰|校区|馆|市|区|店")
 
-def classify(venue_name, venue_key, canonical_list):
-    name = venue_name or ""
-    for c in canonical_list:
-        if venue_key in (c.get("platform_ids") or []):
-            return c
-    for c in canonical_list:
-        if any(p and p in name for p in (c.get("name_patterns") or [])):
-            return c
-    return None
-
 def norm_name(s):
     # 馆名规范化：NFKC（全角括号/字母转半角）→ 合并空白 → 去首尾空格 → 小写
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", s or "")).strip().lower()

@@ -1,80 +1,76 @@
-# sync.py —— 刷新编排：两平台抓取 → 归一化 → 入库 → 场馆归类 → 补坐标/通勤
-import json, urllib.error
+# sync.py —— 刷新编排：两平台抓取 → 归一化 → 入库；场馆归类（馆名 → 高德 POI）与通勤补算
+import json, sqlite3, urllib.error
 from datetime import date, timedelta
 import db, creds as creds_mod, venues, commute
 from platforms import zhongyulian, flashx
 
 _COLS = ("source", "source_id", "title", "date", "start_time", "end_time", "duration_min",
-         "venue_name", "venue_key", "canonical_id", "price", "applied_num", "total_num",
+         "venue_name", "platform_name_norm", "venue_key", "price", "applied_num", "total_num",
          "lat", "lng", "raw_text", "tags", "organizer", "club_name", "detail_ref")
 
-_KEEP = ("canonical_id", "lat", "lng")  # 「算通勤」补上的场馆归类/坐标，平台解析结果里没有
-
 def upsert_games(conn, games):
-    # 已有行按 (source, source_id) 更新；新值为空且场馆没变时保留 _KEEP 旧值，
-    # 否则刷新会清空归类，通勤缓存键(c:<canonical_id>)对不上而显示未知
-    sets = ",".join(
-        f"{c}=CASE WHEN excluded.{c} IS NULL AND excluded.venue_key IS games.venue_key"
-        f" THEN games.{c} ELSE excluded.{c} END" if c in _KEEP else f"{c}=excluded.{c}"
-        for c in _COLS if c not in ("source", "source_id"))
-    q = (f"INSERT INTO games({','.join(_COLS)}) VALUES ({','.join('?' * len(_COLS))}) "
-         f"ON CONFLICT(source, source_id) DO UPDATE SET {sets}")
-    conn.executemany(q, [tuple(g.get(c) for c in _COLS) for g in games])
+    # 按 (source, source_id) 整行写入（lat/lng 只存平台原始坐标，新值覆盖即正确）；
+    # 新出现的馆名在 venue_aliases 记一行 pending，等「算通勤」归类
+    rows = [tuple(venues.norm_name(g.get("venue_name")) if c == "platform_name_norm" else g.get(c)
+                  for c in _COLS) for g in games]
+    conn.executemany(f"INSERT OR REPLACE INTO games({','.join(_COLS)}) "
+                     f"VALUES ({','.join('?' * len(_COLS))})", rows)
+    norms = {(r[_COLS.index("platform_name_norm")],) for r in rows}
+    conn.executemany("INSERT OR IGNORE INTO venue_aliases(platform_name_norm, origin) VALUES(?, 'pending')",
+                     [n for n in norms if n[0]])
     conn.execute("DELETE FROM games WHERE date < ?", (date.today().isoformat(),))
     conn.commit()
 
-def auto_canonical(conn, game, canonical_list):
-    # 未匹配任何已有规范馆 → 高德 POI 搜索，用搜出的名字自动建/复用规范馆
-    # 跨平台去重：两平台不同叫法若搜到同一 POI(amap_id) 则归并到同一规范馆
-    poi = commute.poi_search(game["venue_name"] or "")
-    if not poi:
-        return None
-    name = game["venue_name"] or ""
-    row = conn.execute("SELECT * FROM canonical_venues WHERE amap_id=?", (poi["amap_id"],)).fetchone()
-    if row:  # 同一 POI 的另一种叫法 → 复用，并记进 name_patterns 省得下次再搜
-        pats = json.loads(row["name_patterns"] or "[]")
-        if name and name not in pats:
-            pats.append(name)
-            conn.execute("UPDATE canonical_venues SET name_patterns=? WHERE id=?",
-                         (json.dumps(pats, ensure_ascii=False), row["id"]))
-        c = {"id": row["id"], "canonical_name": row["canonical_name"], "lat": row["lat"],
-             "lng": row["lng"], "name_patterns": pats,
-             "platform_ids": json.loads(row["platform_ids"] or "[]"), "amap_id": row["amap_id"]}
-    else:  # 新馆：高德结果名即统一球场名
-        cur = conn.execute(
-            "INSERT INTO canonical_venues(canonical_name,lat,lng,name_patterns,platform_ids,amap_id)"
-            " VALUES(?,?,?,?,?,?)",
-            (poi["name"], poi["lat"], poi["lng"], json.dumps([name], ensure_ascii=False), "[]", poi["amap_id"]))
-        c = {"id": cur.lastrowid, "canonical_name": poi["name"], "lat": poi["lat"], "lng": poi["lng"],
-             "name_patterns": [name], "platform_ids": [], "amap_id": poi["amap_id"]}
-    conn.commit()
-    canonical_list.append(c)  # 同批后续球局可经 classify 命中，无需再搜
-    return c
+def canonical_for_poi(conn, poi):
+    # 高德 POI → 统一球场 id：amap_id 已有则复用，否则新建
+    # （amap_name 与已有统一球场重名时抛 sqlite3.IntegrityError，由调用方处理）
+    row = conn.execute("SELECT id FROM canonical_venues WHERE amap_id=?", (poi["amap_id"],)).fetchone()
+    if row:
+        return row["id"]
+    return conn.execute("INSERT INTO canonical_venues(amap_name, amap_id, lat, lng) VALUES(?,?,?,?)",
+                        (poi["name"], poi["amap_id"], poi["lat"], poi["lng"])).lastrowid
 
-def enrich_venue(conn, game, canonical_list, origins_ll):
-    c = venues.classify(game["venue_name"], game["venue_key"], canonical_list)
-    if c is None:  # 没匹配上 → 自动按高德 POI 建规范馆（去人工维护 config）
-        c = auto_canonical(conn, game, canonical_list)
-    if c:
-        game["canonical_id"] = c["id"]
-        if c["lat"] is not None:  # 规范馆有坐标才覆盖；否则保留球局自带坐标（闪动带经纬度）
-            game["lat"], game["lng"] = c["lat"], c["lng"]
-    if game["lat"] is None:  # 仍缺坐标（中羽联未归类，或归到无坐标规范馆且球局自带也无）→ 地理编码
-        row = conn.execute("SELECT lat,lng FROM venues WHERE venue_key=?",
-                           (game["venue_key"],)).fetchone()
-        if row and row["lat"] is not None:
-            game["lat"], game["lng"] = row["lat"], row["lng"]
+def classify_pending(conn, progress=lambda msg: None):
+    # 当前球局涉及的 pending 馆名逐个搜高德 POI（按馆名，不按球局），取第一条。
+    # 搜不到/重名 → 保持 pending，只记 updated_at，下次重试。
+    # UPDATE 都带 origin='pending'：搜索期间用户若在管理页改过，不覆盖
+    names = conn.execute(
+        "SELECT a.platform_name_norm n, MIN(g.venue_name) raw FROM venue_aliases a"
+        " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
+        " WHERE a.origin = 'pending' GROUP BY a.platform_name_norm").fetchall()
+    for i, r in enumerate(names, 1):
+        pois = commute.poi_search(r["raw"])
+        cid = None
+        if pois:
+            try:
+                cid = canonical_for_poi(conn, pois[0])
+            except sqlite3.IntegrityError:  # 高德名与已有统一球场重名：留给用户手动处理
+                pass
+        if cid:
+            conn.execute("UPDATE venue_aliases SET canonical_id=?, origin='auto', updated_at=datetime('now')"
+                         " WHERE platform_name_norm=? AND origin='pending'", (cid, r["n"]))
         else:
-            ll = commute.geocode(game["venue_name"] or "")
-            if ll:
-                game["lat"], game["lng"] = ll
-                conn.execute("INSERT OR REPLACE INTO venues(venue_key,name,lat,lng,geocoded_at)"
-                             " VALUES(?,?,?,?,datetime('now'))",
-                             (game["venue_key"], game["venue_name"], ll[0], ll[1]))
-    if game["lat"] is None:
-        return  # 坐标仍缺，通勤跳过
-    pk = commute.place_key(game.get("canonical_id"), game["venue_key"])
-    _ensure_commute(conn, pk, commute.amap_coord(game["lat"], game["lng"]), origins_ll)
+            conn.execute("UPDATE venue_aliases SET updated_at=datetime('now')"
+                         " WHERE platform_name_norm=? AND origin='pending'", (r["n"],))
+        conn.commit()
+        progress(f"归类场馆 {i}/{len(names)}")
+
+def commute_places(conn):
+    # 需要通勤的场馆 → 高德坐标串 "lng,lat"：
+    # 已归类 → 统一球场的高德坐标（c:<id>）；未归类但有闪动坐标 → 闪动坐标（v:<venue_key>）；
+    # 中羽联未归类没有坐标（中羽联坐标不可信），不算
+    places = {}
+    for r in conn.execute(
+            "SELECT DISTINCT c.id, c.lat, c.lng FROM games g"
+            " JOIN venue_aliases a ON a.platform_name_norm = g.platform_name_norm"
+            " JOIN canonical_venues c ON c.id = a.canonical_id"):
+        places[commute.place_key(r["id"], None)] = commute.amap_coord(r["lat"], r["lng"])
+    for r in conn.execute(
+            "SELECT g.venue_key, g.lat, g.lng FROM games g"
+            " LEFT JOIN venue_aliases a ON a.platform_name_norm = g.platform_name_norm"
+            " WHERE a.canonical_id IS NULL AND g.lat IS NOT NULL AND g.lng IS NOT NULL"):
+        places.setdefault(commute.place_key(None, r["venue_key"]), commute.amap_coord(r["lat"], r["lng"]))
+    return places
 
 def _ensure_commute(conn, pk, dest, origins_ll):
     # 给场馆 pk 补各出发地通勤(驾车/公交/步行)：三项齐全才跳过；
@@ -134,35 +130,10 @@ def _fetch_flashx(cr, today, progress):
             page += 1
     return games, False
 
-def seed_canonical_venues(conn, config):
-    # config → db：按 canonical_name 幂等写入，已存在则更新并保留原 id
-    for c in config.get("canonical_venues") or []:
-        vals = (c.get("lat"), c.get("lng"),
-                json.dumps(c.get("name_patterns") or [], ensure_ascii=False),
-                json.dumps(c.get("platform_ids") or [], ensure_ascii=False))
-        row = conn.execute("SELECT id FROM canonical_venues WHERE canonical_name=?",
-                           (c["canonical_name"],)).fetchone()
-        if row:
-            conn.execute("UPDATE canonical_venues SET lat=?,lng=?,name_patterns=?,platform_ids=?"
-                         " WHERE id=?", vals + (row["id"],))
-        else:
-            conn.execute("INSERT INTO canonical_venues(lat,lng,name_patterns,platform_ids,"
-                         "canonical_name) VALUES(?,?,?,?,?)", vals + (c["canonical_name"],))
-    conn.commit()
-
-def load_canonical_list(conn):
-    return [{"id": r["id"], "canonical_name": r["canonical_name"],
-             "lat": r["lat"], "lng": r["lng"],
-             "name_patterns": json.loads(r["name_patterns"] or "[]"),
-             "platform_ids": json.loads(r["platform_ids"] or "[]"), "amap_id": r["amap_id"]}
-            for r in conn.execute("SELECT id, canonical_name, lat, lng, name_patterns,"
-                                  " platform_ids, amap_id FROM canonical_venues")]
-
 def refresh(conn, creds, config, progress=lambda msg: None):
     # 只做「抓取 + 入库」，秒级返回；通勤/POI 归类交给 compute_pending 后台跑
     # progress(文字)：每发完一个请求报一次（两平台都给不出可信的总页数，只报已翻页数）
     today = date.today()
-    seed_canonical_venues(conn, config)
     games, auth_failed, errors = [], [], []
     for source, run in (("zhongyulian", lambda c: _fetch_zhongyulian(c, today, progress)),
                         ("flashx", lambda c: _fetch_flashx(c, today, progress))):
@@ -187,59 +158,34 @@ def _origins_ll(conn):
             if r["lat"] is not None and r["lng"] is not None}
 
 def compute_pending(db_path, config, progress=lambda msg: None):
-    # 后台线程用：自开连接。1) 给未归类/无坐标的球局补 规范馆+坐标+通勤；
-    # 2) 给已归类但缺通勤的场馆补算（如刚换了出发地）。按场馆缓存，可重复调。
-    # progress(文字)：先逐条球局归类场馆，再逐个场馆算通勤
+    # 后台线程用：自开连接。先归类 pending 馆名，再给缺通勤的场馆补算（按场馆缓存，可重复调）
+    # progress(文字)：「归类场馆 i/n」→「算各场馆通勤 i/n」
     conn = db.connect(db_path)
     try:
-        canonical = load_canonical_list(conn)
+        classify_pending(conn, progress)
         origins_ll = _origins_ll(conn)
-        pending = [dict(r) for r in conn.execute(
-            "SELECT * FROM games WHERE canonical_id IS NULL OR lat IS NULL")]
-        done = []
-        for i, g in enumerate(pending, 1):
+        places = commute_places(conn)
+        for i, (pk, dest) in enumerate(places.items(), 1):
             try:
-                enrich_venue(conn, g, canonical, origins_ll)
-                done.append(g)
-            except Exception:  # 单个场馆的高德/编码异常只跳过该场馆
+                _ensure_commute(conn, pk, dest, origins_ll)
+            except Exception:  # 单个场馆的高德异常只跳过该场馆
                 pass
-            progress(f"归类球局场馆 {i}/{len(pending)}")
-        if done:
-            upsert_games(conn, done)  # 写回 enrich 补上的 canonical_id/坐标
-        _fill_missing_commute(conn, origins_ll, progress)
+            progress(f"算各场馆通勤 {i}/{len(places)}")
     finally:
         conn.close()
 
-def _fill_missing_commute(conn, origins_ll, progress):
-    # 按场馆(place_key)去重，给所有有坐标的场馆补缺失的通勤（换出发地后缓存被清会重算）
-    places = {}
-    for r in conn.execute("SELECT canonical_id, venue_key, lat, lng FROM games WHERE lat IS NOT NULL"):
-        pk = commute.place_key(r["canonical_id"], r["venue_key"])
-        places.setdefault(pk, commute.amap_coord(r["lat"], r["lng"]))
-    for i, (pk, dest) in enumerate(places.items(), 1):
-        try:
-            _ensure_commute(conn, pk, dest, origins_ll)
-        except Exception:
-            pass
-        progress(f"算各场馆通勤 {i}/{len(places)}")
-
 def pending_count(conn):
-    # 还需补数据的场馆数：无坐标(POI/geocode 失败) + 有坐标但缺某出发地通勤
-    # 高德失败不缓存，故这些会在下次刷新/改地址时自动重试；此数用于提示用户重试
+    # 还需处理的场馆数：当前球局涉及的 pending 馆名 + 通勤三项未算齐的场馆；用于提示用户重试
     origins = [r["key"] for r in conn.execute("SELECT key FROM origins WHERE lat IS NOT NULL")]
     if not origins:
         return 0
-    pending, places = set(), set()  # 先按场馆去重，避免对每条球局都查一次
-    for r in conn.execute("SELECT DISTINCT canonical_id, venue_key, lat FROM games"):
-        if r["lat"] is None:
-            pending.add(("v", r["venue_key"]))
-        else:
-            places.add(commute.place_key(r["canonical_id"], r["venue_key"]))
-    for pk in places:
-        # 三项齐全的出发地才算"完成"（部分缺失会重算）
+    n = conn.execute("SELECT COUNT(DISTINCT a.platform_name_norm) c FROM venue_aliases a"
+                     " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
+                     " WHERE a.origin = 'pending'").fetchone()["c"]
+    for pk in commute_places(conn):
         complete = conn.execute(
             "SELECT COUNT(*) c FROM commute WHERE place_key=? AND drive_min IS NOT NULL"
             " AND transit_min IS NOT NULL AND walk_m IS NOT NULL", (pk,)).fetchone()["c"]
         if complete < len(origins):
-            pending.add(("pk", pk))
-    return len(pending)
+            n += 1
+    return n

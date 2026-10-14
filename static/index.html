@@ -245,7 +245,7 @@ const fmtCommute = (c) => {
 };
 
 function rowHtml(g) {
-  const venue = esc(g.venue_name || "") + (g.canonical_name ? `<br><span class="muted">${esc(g.canonical_name)}</span>` : "");
+  const venue = esc(g.venue_name || "") + (g.amap_name ? `<br><span class="muted">${esc(g.amap_name)}</span>` : "");
   const tags = parseTags(g.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
   return `<tr class="row"><td class="nowrap">${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
     <td class="nowrap">${fmtDur(g.duration_min)}</td><td>${venue}</td><td>${esc(g.club_name || "—")}</td>
@@ -281,7 +281,7 @@ function applyOrigins(o) {
 }
 
 // 场馆下拉候选：库里出现过的馆名 + 统一名；关键字下拉候选：用过的词 + 球局标签
-const venueOptions = () => [...new Set(window._games.flatMap((g) => [g.venue_name, g.canonical_name]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
+const venueOptions = () => [...new Set(window._games.flatMap((g) => [g.venue_name, g.amap_name]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
 const clubOptions = () => [...new Set(window._games.map((g) => g.club_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
 const kwOptions = () => [...new Set([...kwSeen, ...window._games.flatMap((g) => parseTags(g.tags))])].sort((a, b) => a.localeCompare(b, "zh"));
 

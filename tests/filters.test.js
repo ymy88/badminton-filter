@@ -21,7 +21,7 @@ assert.equal(applyFilters([g({ venue_name: "万体汇" }), g({ venue_name: "荫�
 assert.equal(applyFilters([g({ venue_name: "万体汇" }), g({ venue_name: "荫荫" })],
   { venueExclude: ["荫荫"] }).length, 1);
 // 场馆按统一名也能筛（下拉给的是统一名，原始馆名不同）
-assert.equal(applyFilters([g({ venue_name: "万体汇", canonical_name: "徐家汇体育公园" }), g({ venue_name: "荫荫" })],
+assert.equal(applyFilters([g({ venue_name: "万体汇", amap_name: "徐家汇体育公园" }), g({ venue_name: "荫荫" })],
   { venueInclude: ["徐家汇"] }).length, 1);
 
 // 俱乐部双向筛选
@@ -111,7 +111,7 @@ assert.equal(applyFilters([g({ source: "flashx" }), g({ source: "zhongyulian" })
 // 新增排序列：时长数值、场馆按统一名（无则原名）、标签空排最后
 const ids = (arr) => arr.map((x) => x.id).join();
 assert.equal(ids(sortGames([g({ id: "a", duration_min: 180 }), g({ id: "b", duration_min: null }), g({ id: "c", duration_min: 60 })], "duration")), "c,a,b");
-assert.equal(ids(sortGames([g({ id: "a", venue_name: "乙", canonical_name: "甲馆" }), g({ id: "b", venue_name: "阿" })], "venue")), "b,a");
+assert.equal(ids(sortGames([g({ id: "a", venue_name: "乙", amap_name: "甲馆" }), g({ id: "b", venue_name: "阿" })], "venue")), "b,a");
 assert.equal(ids(sortGames([g({ id: "a", tags: "[]" }), g({ id: "b", tags: '["新手局"]' })], "tags")), "b,a");
 assert.deepEqual(parseTags('["a",""]'), ["a"]);
 

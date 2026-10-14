@@ -47,14 +47,26 @@ def test_geocode_bad_location(monkeypatch):
     assert commute.geocode("某地址") is None
 
 def test_poi_search_parses(monkeypatch):
-    # 取第一条 POI：名字 + id + 坐标(lng,lat → lat,lng)
-    monkeypatch.setattr(commute, "_amap_get", lambda url, params: {"status": "1",
-        "pois": [{"id": "B1", "name": "徐家汇体育公园", "location": "121.43,31.18"}]})
-    assert commute.poi_search("万体汇") == {"amap_id": "B1", "name": "徐家汇体育公园", "lat": 31.18, "lng": 121.43}
+    # 名字 + id + 坐标(lng,lat → lat,lng) + 所在区 + 地址；高德空字段是 [] → 空串；坏条目跳过
+    seen = {}
+    def fake(url, params):
+        seen.update(params)
+        return {"status": "1", "pois": [
+            {"id": "B1", "name": "徐家汇体育公园", "location": "121.43,31.18", "adname": "徐汇区", "address": "漕溪北路1111号"},
+            {"id": "B2", "name": "坏坐标", "location": "bad"},
+            {"id": "B3", "name": "无地址", "location": "121.5,31.2", "adname": [], "address": []}]}
+    monkeypatch.setattr(commute, "_amap_get", fake)
+    r = commute.poi_search("万体汇", limit=10)
+    assert seen["offset"] == 10
+    assert r == [{"amap_id": "B1", "name": "徐家汇体育公园", "lat": 31.18, "lng": 121.43,
+                  "district": "徐汇区", "address": "漕溪北路1111号"},
+                 {"amap_id": "B3", "name": "无地址", "lat": 31.2, "lng": 121.5, "district": "", "address": ""}]
 
 def test_poi_search_empty(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get", lambda url, params: {"status": "1", "pois": []})
-    assert commute.poi_search("不存在") is None
+    assert commute.poi_search("不存在") == []
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: None)  # 请求失败
+    assert commute.poi_search("不存在") == []
 
 def test_route_minutes_transit_gets_departure_time(monkeypatch):
     # 公交必须带出发时间 date/time，否则午夜按停运算（返回空/超长）

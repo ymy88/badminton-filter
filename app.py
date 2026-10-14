@@ -24,9 +24,11 @@ def create_app(conn, config, db_path=None):
 
     @app.get("/api/games")
     def games():
+        # 场馆归属查询时现关联：games.platform_name_norm → venue_aliases → canonical_venues
         rows = conn.execute(
-            "SELECT games.*, canonical_venues.canonical_name FROM games "
-            "LEFT JOIN canonical_venues ON games.canonical_id=canonical_venues.id").fetchall()
+            "SELECT games.*, a.canonical_id, c.amap_name FROM games"
+            " LEFT JOIN venue_aliases a ON a.platform_name_norm = games.platform_name_norm"
+            " LEFT JOIN canonical_venues c ON c.id = a.canonical_id").fetchall()
         cm = {}
         for r in conn.execute("SELECT origin,place_key,drive_min,transit_min,walk_m FROM commute"):
             cm[(r["origin"], r["place_key"])] = {"drive_min": r["drive_min"],
@@ -42,12 +44,10 @@ def create_app(conn, config, db_path=None):
 
     @app.get("/api/config")
     def get_config():
-        names = [r["canonical_name"] for r in
-                 conn.execute("SELECT canonical_name FROM canonical_venues ORDER BY id")]
         hist = [r["word"] for r in conn.execute("SELECT word FROM kw_history ORDER BY rowid")]
         row = conn.execute("SELECT data FROM filters WHERE id=1").fetchone()
         return jsonify({"filters": json.loads(row["data"]) if row else None,
-                        "kw_history": hist, "canonical_names": names})
+                        "kw_history": hist})
 
     @app.post("/api/filters")
     def save_filters():
@@ -188,7 +188,7 @@ def create_app(conn, config, db_path=None):
     return app
 
 if __name__ == "__main__":
-    try:  # config.json 可选：缺省即用默认（端口 8765 / 无关键字预设 / 场馆全自动）
+    try:  # config.json 可选：缺省即用默认（端口 8765）
         with open("config.json", encoding="utf-8") as f:
             cfg = json.load(f)
     except FileNotFoundError:

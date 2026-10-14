@@ -61,7 +61,7 @@ function applyFilters(games, criteria) {
     if (c.onlyOpen && !(g.applied_num < g.total_num)) return false;
 
     // 场馆同时匹配原始馆名与统一名（下拉可能给的是统一名）；include 用 some(Boolean) 容空串
-    const venueText = (g.venue_name || "") + "\u0001" + (g.canonical_name || "");
+    const venueText = (g.venue_name || "") + "\u0001" + (g.amap_name || "");
     if (c.venueInclude?.some(Boolean) && !textHit(venueText, c.venueInclude)) return false;
     if (c.venueExclude?.length && textHit(venueText, c.venueExclude)) return false;
 
@@ -85,7 +85,7 @@ function sortKey(by, mode) {
     case "applied": return (g) => g.applied_num;
     case "club": return (g) => g.club_name;  // 字符串排序
     case "duration": return (g) => g.duration_min;
-    case "venue": return (g) => g.canonical_name || g.venue_name;  // 按统一名，同一球馆两平台排在一起
+    case "venue": return (g) => g.amap_name || g.venue_name;  // 按高德名，同一球馆两平台排在一起
     case "source": return (g) => g.source;
     case "tags": return (g) => parseTags(g.tags).join(" ");
     default: return null;
