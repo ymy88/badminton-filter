@@ -132,4 +132,23 @@ function rankCandidates(q, names, py = {}, k = 8, minSim = 0.25) {
   return scored.sort((a, b) => b[1] - a[1]).slice(0, k).map(([n]) => n);
 }
 
-export { applyFilters, sortGames, pyMatch, parseTags, rankCandidates };
+// 百度坐标 BD-09 → 高德坐标 GCJ-02（公开换算公式，误差几米）
+function bd09ToGcj02(lng, lat) {
+  const xPi = Math.PI * 3000 / 180;
+  const x = lng - 0.0065, y = lat - 0.006;
+  const z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * xPi);
+  const theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * xPi);
+  return [z * Math.cos(theta), z * Math.sin(theta)];
+}
+
+// 粘贴的坐标串 → 高德坐标 {lat, lng}；sys="bd09" 时从百度坐标换算。
+// 逗号/空格分隔，经纬度顺序不限（大于 90 的是经度）；解析不了返回 null
+function parseCoord(text, sys = "gcj02") {
+  const nums = (text || "").split(/[\s,，]+/).filter(Boolean).map(Number);
+  if (nums.length !== 2 || !nums.every(Number.isFinite)) return null;
+  let [lng, lat] = nums[0] > 90 ? nums : [nums[1], nums[0]];
+  if (sys === "bd09") [lng, lat] = bd09ToGcj02(lng, lat);
+  return { lat: +lat.toFixed(6), lng: +lng.toFixed(6) };
+}
+
+export { applyFilters, sortGames, pyMatch, parseTags, rankCandidates, parseCoord };

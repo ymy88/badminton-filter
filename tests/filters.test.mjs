@@ -1,6 +1,6 @@
 // 前端筛选纯函数自测：node tests/filters.test.mjs
 import assert from "node:assert";
-import { applyFilters, sortGames, pyMatch, parseTags, rankCandidates } from "../static/filters.js";
+import { applyFilters, sortGames, pyMatch, parseTags, rankCandidates, parseCoord } from "../static/filters.js";
 
 const g = (o) => Object.assign({
   date: "2026-10-11", start_time: "19:00", duration_min: 120,
@@ -92,6 +92,15 @@ assert.equal(sortGames(inp, "nope").length, 1);
 // 回归：include 仅含空串视为无筛选（不误剔全部）
 assert.equal(applyFilters([g({ raw_text: "练球" }), g({ raw_text: "双打" })], { kwInclude: [""] }).length, 2);
 assert.equal(applyFilters([g({ venue_name: "万体汇" })], { venueInclude: [""] }).length, 1);
+
+// 坐标解析：高德原样；经纬度顺序不限；中文逗号/空格；百度坐标换算（对照 coordtransform 的公开样例）
+assert.deepEqual(parseCoord("121.43561,31.189399"), { lat: 31.189399, lng: 121.43561 });
+assert.deepEqual(parseCoord("31.189399， 121.43561"), { lat: 31.189399, lng: 121.43561 });
+assert.deepEqual(parseCoord(" 121.43561 31.189399 "), { lat: 31.189399, lng: 121.43561 });
+assert.equal(parseCoord("121.4"), null);
+assert.equal(parseCoord("121.4,abc"), null);
+assert.equal(parseCoord(""), null);
+assert.deepEqual(parseCoord("116.404,39.915", "bd09"), { lat: 39.908657, lng: 116.397627 });
 
 console.log("filters.js OK");
 

@@ -24,6 +24,10 @@ def _core(s):
 def _bigrams(s):
     return {s[i:i + 2] for i in range(len(s) - 1)} or {s}
 
+def in_shanghai(lat, lng):
+    # 粗略的上海范围（含崇明），挡住复制错/经纬度写反的坐标
+    return 30.6 <= lat <= 31.95 and 120.85 <= lng <= 122.2
+
 def distance_m(a, b):
     # 两点 (lat, lng) 球面直线距离（米）
     (la1, lo1), (la2, lo2) = a, b

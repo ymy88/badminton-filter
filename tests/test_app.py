@@ -242,6 +242,30 @@ def test_assign_new_poi_creates_canonical_and_reuses_amap_id():
     assert r2["canonical_id"] == new_id  # 同 amap_id 复用
     assert conn.execute("SELECT COUNT(*) FROM canonical_venues").fetchone()[0] == 3
 
+def test_assign_manual_coord_creates_canonical_without_poi():
+    conn, c = _venue_app()
+    r = c.post("/api/venues/assign", json={"platform_name_norm": "野馆",
+                                           "coord": {"name": " 野馆 ", "lat": 31.1894, "lng": 121.4356}}).get_json()
+    assert r["ok"] and r["has_commute"] is False
+    v = _row(c, "野馆")
+    assert v["origin"] == "manual" and v["canonical"]["amap_name"] == "野馆" and v["canonical"]["manual_coord"] is True
+    assert _row(c, "堂颂羽毛球馆(淞南店)")["canonical"]["manual_coord"] is False
+    # 两个手动坐标球场都没有 POI id，不能互相复用
+    r2 = c.post("/api/venues/assign", json={"platform_name_norm": "堂颂羽毛球馆(淞南店)",
+                                            "coord": {"name": "另一个", "lat": 31.2, "lng": 121.4}}).get_json()
+    assert r2["canonical_id"] != r["canonical_id"]
+
+def test_assign_manual_coord_errors():
+    conn, c = _venue_app()
+    post = lambda coord: c.post("/api/venues/assign", json={"platform_name_norm": "野馆", "coord": coord})
+    assert post({"name": "x", "lat": 39.9, "lng": 116.4}).status_code == 400   # 不在上海
+    assert post({"name": "x", "lat": 121.4, "lng": 31.2}).status_code == 400   # 经纬度写反
+    assert post({"name": " ", "lat": 31.2, "lng": 121.4}).status_code == 400   # 没名字
+    assert post({"name": "x", "lat": "31.2", "lng": 121.4}).status_code == 400
+    r = post({"name": "万体汇", "lat": 31.2, "lng": 121.4})                     # 与已有统一球场重名
+    assert r.status_code == 409 and not conn.in_transaction
+    assert _row(c, "野馆")["origin"] == "pending"
+
 def test_assign_errors():
     conn, c = _venue_app()
     assert c.post("/api/venues/assign", json={"platform_name_norm": "野馆"}).status_code == 400

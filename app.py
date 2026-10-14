@@ -2,7 +2,7 @@
 import json, sqlite3, threading, time, webbrowser
 from pypinyin import Style, lazy_pinyin
 from flask import Flask, jsonify, request, send_from_directory
-import commute, creds, db, sync
+import commute, creds, db, sync, venues
 
 ORIGINS = ("home", "company")
 
@@ -115,11 +115,11 @@ def create_app(conn, config, db_path=None):
 
     @app.post("/api/venues/assign")
     def venues_assign():
-        # 手动指定：已有统一球场(canonical_id) 或 高德 POI(poi，amap_id 已有则复用)
+        # 手动指定：已有统一球场(canonical_id)、高德 POI(poi，amap_id 已有则复用) 或 手动坐标(coord)
         body, row, err = _alias_req()
         if err:
             return err
-        cid, poi = body.get("canonical_id"), body.get("poi")
+        cid, poi, coord = body.get("canonical_id"), body.get("poi"), body.get("coord")
         if isinstance(cid, int) and not isinstance(cid, bool):
             if not conn.execute("SELECT 1 FROM canonical_venues WHERE id=?", (cid,)).fetchone():
                 return jsonify({"ok": False, "msg": "没有这个统一球场"}), 404
@@ -130,8 +130,19 @@ def create_app(conn, config, db_path=None):
             except sqlite3.IntegrityError:
                 conn.rollback()  # 失败的 INSERT 已隐式开事务并拿写锁，不收掉会卡住后台线程的写入
                 return jsonify({"ok": False, "msg": f"高德名「{poi['name']}」与已有统一球场重名"}), 409
+        elif isinstance(coord, dict) and isinstance(coord.get("name"), str) and coord["name"].strip() \
+                and _is_num(coord.get("lat")) and _is_num(coord.get("lng")):
+            # 手动坐标（前端已换成高德坐标）：新建无 POI id 的统一球场
+            if not venues.in_shanghai(coord["lat"], coord["lng"]):
+                return jsonify({"ok": False, "msg": "坐标不在上海范围内，检查一下是不是复制错了"}), 400
+            try:
+                cid = sync.canonical_for_poi(conn, {"amap_id": None, "name": coord["name"].strip(),
+                                                    "lat": coord["lat"], "lng": coord["lng"]})
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                return jsonify({"ok": False, "msg": f"「{coord['name'].strip()}」与已有统一球场重名，换个名字或直接选已有的"}), 409
         else:
-            return jsonify({"ok": False, "msg": "需要 canonical_id 或 poi{amap_id,name,lat,lng}"}), 400
+            return jsonify({"ok": False, "msg": "需要 canonical_id、poi{amap_id,name,lat,lng} 或 coord{name,lat,lng}"}), 400
         _set_alias(row["platform_name_norm"], "manual", cid)
         has = conn.execute("SELECT 1 FROM commute WHERE place_key=?", (commute.place_key(cid, None),)).fetchone()
         return jsonify({"ok": True, "canonical_id": cid, "has_commute": bool(has)})

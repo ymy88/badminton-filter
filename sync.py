@@ -23,7 +23,7 @@ def upsert_games(conn, games):
     conn.commit()
 
 def canonical_for_poi(conn, poi):
-    # 高德 POI → 统一球场 id：amap_id 已有则复用，否则新建
+    # 高德 POI → 统一球场 id：amap_id 已有则复用，否则新建（手动坐标 amap_id=None，总是新建）
     # （amap_name 与已有统一球场重名时抛 sqlite3.IntegrityError，由调用方处理）
     row = conn.execute("SELECT id FROM canonical_venues WHERE amap_id=?", (poi["amap_id"],)).fetchone()
     if row:
@@ -217,11 +217,12 @@ def venue_rows(conn):
             s["flashx"].append((r["lat"], r["lng"]))
     with_commute = {r[0] for r in conn.execute("SELECT DISTINCT place_key FROM commute")}
     out = []
-    for a in conn.execute("SELECT a.*, c.amap_name, c.lat, c.lng FROM venue_aliases a"
+    for a in conn.execute("SELECT a.*, c.amap_name, c.amap_id, c.lat, c.lng FROM venue_aliases a"
                           " LEFT JOIN canonical_venues c ON c.id = a.canonical_id"):
         s = stats.get(a["platform_name_norm"])
         name = s["names"].most_common(1)[0][0] if s else a["platform_name_norm"]
-        canon = ({"id": a["canonical_id"], "amap_name": a["amap_name"], "lat": a["lat"], "lng": a["lng"]}
+        canon = ({"id": a["canonical_id"], "amap_name": a["amap_name"], "lat": a["lat"], "lng": a["lng"],
+                  "manual_coord": a["amap_id"] is None}
                  if a["canonical_id"] else None)
         suspect = []
         if a["origin"] == "auto" and canon:  # 只审自动归类；用户看过的(confirmed/manual)不再判

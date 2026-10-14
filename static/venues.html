@@ -58,14 +58,14 @@
   </div>
   <section class="card">
     <table>
-      <thead><tr><th>平台馆名</th><th>来源</th><th>球局数</th><th>高德 POI</th><th>状态</th><th>操作</th></tr></thead>
+      <thead><tr><th>平台馆名</th><th>来源</th><th>球局数</th><th>统一球场</th><th>状态</th><th>操作</th></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
   </section>
 </main>
 
 <script type="module">
-import { pyMatch, rankCandidates } from "/static/filters.js";
+import { pyMatch, rankCandidates, parseCoord } from "/static/filters.js";
 import { $, SRC, esc, api, PY, ensurePinyin } from "/static/common.js";
 
 let rows = [], canonicals = [];
@@ -110,7 +110,8 @@ function rowHtml(v) {
     <td>${esc(v.name)}</td>
     <td>${v.sources.map((s) => `<span class="src ${esc(s)}">${esc(SRC[s] || s)}</span>`).join("")}</td>
     <td>${v.game_count}</td>
-    <td>${c ? esc(c.amap_name) + mapLink(c.amap_name, c.lat, c.lng) : '<span class="muted">—</span>'}</td>
+    <td>${c ? esc(c.amap_name) + (c.manual_coord ? ' <span class="tag">手动坐标</span>' : "") + mapLink(c.amap_name, c.lat, c.lng)
+      : '<span class="muted">—</span>'}</td>
     <td>${status(v)}</td>
     <td class="ops">${ops(v)}</td></tr>`;
 }
@@ -146,7 +147,15 @@ function openEditor(tr) {
   ed.className = "edit";
   ed.innerHTML = `<td colspan="6"><div class="ed">
     <div class="row"><input type="text" value="${esc(v.name)}"><button data-act="amap">在高德搜索</button><button data-act="close">取消</button></div>
-    <div class="pick canon"></div><div class="pick amap"></div></div></td>`;
+    <div class="pick canon"></div><div class="pick amap"></div>
+    <div class="row"><span class="nowrap">高德搜不到？手动指定坐标：</span>
+      <input class="cname" type="text" value="${esc(v.name)}" placeholder="名称">
+      <input class="cll" type="text" placeholder="经度,纬度">
+      <select class="csys"><option value="gcj02">高德坐标</option><option value="bd09">百度坐标</option></select>
+      <button data-act="coord">保存坐标</button></div>
+    <div class="muted">从 <a href="https://lbs.amap.com/tools/picker" target="_blank" rel="noopener">高德坐标拾取器</a>
+      或 <a href="https://api.map.baidu.com/lbsapi/getpoint/" target="_blank" rel="noopener">百度坐标拾取</a>
+      搜到场馆、点一下复制坐标（百度坐标会自动换算）<span class="cprev"></span></div></div></td>`;
   tr.after(ed);
   const input = ed.querySelector("input");
   const showCanon = () => {
@@ -157,6 +166,14 @@ function openEditor(tr) {
       hits.map((c) => `<div data-cid="${c.id}">${esc(c.amap_name)}${mapLink(c.amap_name, c.lat, c.lng)}</div>`).join("") : "";
   };
   input.addEventListener("input", showCanon);
+  // 手动坐标：边输入边预览换算后的高德坐标，保存前可点地图链接核对位置
+  const coordPreview = () => {
+    const ll = parseCoord(ed.querySelector(".cll").value, ed.querySelector(".csys").value);
+    ed.querySelector(".cprev").innerHTML = !ed.querySelector(".cll").value.trim() ? ""
+      : ll ? ` → 高德坐标 ${ll.lng},${ll.lat}${mapLink(ed.querySelector(".cname").value || "场馆", ll.lat, ll.lng)}`
+      : ' → <span class="err">格式不对，应为「经度,纬度」</span>';
+  };
+  ed.querySelectorAll(".cll, .csys, .cname").forEach((el) => el.addEventListener("input", coordPreview));
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") searchAmap(ed); });
   showCanon();
   input.focus();
@@ -206,6 +223,12 @@ $("tbody").addEventListener("click", (e) => {
     if (a === "edit") openEditor(tr);
     else if (a === "close") { editing = null; tr.remove(); }
     else if (a === "amap") searchAmap(tr);
+    else if (a === "coord") {
+      const name = tr.querySelector(".cname").value.trim();
+      const ll = parseCoord(tr.querySelector(".cll").value, tr.querySelector(".csys").value);
+      if (!name || !ll) { $("status").className = "err"; $("status").textContent = "手动坐标需要名称和「经度,纬度」"; }
+      else assign(norm, { coord: { name, ...ll } }, name);
+    }
     else if (a === "confirm") act(norm, "/api/venues/confirm");
     else if (a === "reset") act(norm, "/api/venues/reset");
     else if (a === "none") act(norm, "/api/venues/none");
