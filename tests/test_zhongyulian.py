@@ -77,3 +77,8 @@ def test_fetch_keeps_pages_when_later_page_fails(monkeypatch):
     out = json.loads(z.fetch({"skey": "k"}, 0))
     assert len(out["list"]["other_club_movement_list"]) == 10
     assert calls == [0, 10, 10]  # 第 2 页重试了一次
+
+def test_duration_rounded_to_30min():
+    dur = lambda t: z.parse_games(_resp([_item(time=t)]), day=0, today=TODAY)[0]["duration_min"]
+    assert dur("21:00~23:59") == 180
+    assert dur("19:00~21:15") == 150

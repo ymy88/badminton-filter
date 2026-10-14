@@ -42,3 +42,10 @@ def test_non_json_or_fail_returns_empty():
     assert f.parse_games("[]") == []
     assert f.parse_games("null") == []
     assert f.parse_games(json.dumps({"success": True, "result": None})) == []
+
+def test_duration_rounded_to_30min():
+    # 结束时间不整（如 23:59）→ 时长四舍五入到 30 分钟，免得落错时长档
+    dur = lambda st, et: f.parse_games(_resp([_rec(startTime=st, endTime=et)]))[0]["duration_min"]
+    assert dur("21:00", "23:59") == 180
+    assert dur("19:00", "21:15") == 150  # 135 → 半档向上
+    assert dur("19:00", "21:10") == 120

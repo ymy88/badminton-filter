@@ -13,7 +13,7 @@ def _dur(st, et):
         (h1, m1), (h2, m2) = (x.split(":") for x in (st, et))
         d = (int(h2)*60+int(m2)) - (int(h1)*60+int(m1))
         # 跨午夜或负时长与中羽联侧对齐，置 None
-        return d if d >= 0 else None
+        return (d + 15) // 30 * 30 if d >= 0 else None  # 四舍五入到 30 分钟（结束 23:59 这类）
     except (ValueError, AttributeError):
         return None
 

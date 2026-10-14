@@ -9,7 +9,7 @@ def _split_time(t):
     a, b = (x.strip() for x in t.split("~", 1))
     try:
         dur = (_mins(b) - _mins(a))
-        return a, b, dur if dur >= 0 else None
+        return a, b, (dur + 15) // 30 * 30 if dur >= 0 else None  # 四舍五入到 30 分钟（结束 23:59 这类）
     except ValueError:
         return a, b, None
 
