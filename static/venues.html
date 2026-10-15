@@ -156,12 +156,13 @@ function openEditor(tr) {
     <div class="pick canon"></div><div class="pick amap"></div>
     <div class="row"><span class="nowrap">高德搜不到？手动指定坐标：</span>
       <input class="cname" type="text" value="${esc(v.name)}" placeholder="名称">
-      <input class="cll" type="text" placeholder="经度,纬度">
+      <input class="cll" type="text" placeholder="经度,纬度 或 百度地图链接">
       <select class="csys"><option value="gcj02">高德坐标</option><option value="bd09">百度坐标</option></select>
       <button data-act="coord">保存坐标</button></div>
     <div class="muted">从 <a href="https://lbs.amap.com/tools/picker" target="_blank" rel="noopener">高德坐标拾取器</a>
       或 <a href="https://api.map.baidu.com/lbsapi/getpoint/" target="_blank" rel="noopener">百度坐标拾取</a>
-      搜到场馆、点一下复制坐标（百度坐标会自动换算）<span class="cprev"></span></div></div></td>`;
+      搜到场馆、点一下复制坐标（百度坐标会自动换算）；
+      也可以在 <a href="https://map.baidu.com/" target="_blank" rel="noopener">百度地图</a> 点开场馆后（别拖动地图）把地址栏链接整条粘进来<span class="cprev"></span></div></div></td>`;
   tr.after(ed);
   const input = ed.querySelector("input");
   const showCanon = () => {
@@ -178,7 +179,7 @@ function openEditor(tr) {
     ed.querySelector(".cprev").innerHTML = !ed.querySelector(".cll").value.trim() ? ""
       : ll?.coarse ? ' → <span class="err">精度不够：小数至少 4 位（坐标拾取器要登录并认证才显示完整坐标）</span>'
       : ll ? ` → 高德坐标 ${ll.lng},${ll.lat}${mapLink(ed.querySelector(".cname").value || "场馆", ll.lat, ll.lng)}`
-      : ' → <span class="err">格式不对，应为「经度,纬度」</span>';
+      : ' → <span class="err">格式不对，应为「经度,纬度」或百度地图链接</span>';
   };
   ed.querySelectorAll(".cll, .csys, .cname").forEach((el) => el.addEventListener("input", coordPreview));
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") searchAmap(ed); });

@@ -104,6 +104,9 @@ assert.equal(parseCoord("121.4"), null);
 assert.equal(parseCoord("121.4,abc"), null);
 assert.equal(parseCoord(""), null);
 assert.deepEqual(parseCoord("116.404000,39.915000", "bd09"), { lat: 39.908657, lng: 116.397627, coarse: false });
+// 百度地图网页链接：@ 后的墨卡托坐标（荫荫羽毛球蒙自路校区，高德逆地理编码落在蒙自路 757 号）
+assert.deepEqual(parseCoord("https://map.baidu.com/poi/x/@13524179.935,3636854.56,19z?uid=1"),
+  { lat: 31.197629, lng: 121.481901, coarse: false });
 
 console.log("filters.js OK");
 
