@@ -194,6 +194,12 @@ def create_app(conn, config, db_path=None):
         conn.commit()
         return jsonify({"ok": True})
 
+    @app.post("/api/venues/prune")
+    def venues_prune():  # 删掉没有馆名关联的统一球场
+        if compute_lock.locked():  # 算通勤会把馆名归到已有统一球场，同时删可能删掉它刚选中的
+            return jsonify({"ok": False, "msg": "正在算通勤，等算完再清理"}), 409
+        return jsonify({"ok": True, "deleted": sync.delete_orphan_canonicals(conn)})
+
     @app.get("/api/origins")
     def get_origins():
         rows = {r["key"]: r for r in conn.execute("SELECT key,address,lat FROM origins")}

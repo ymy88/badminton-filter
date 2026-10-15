@@ -210,6 +210,7 @@ lat, lng   平台原始坐标          origin                           amap_id 
 | `POST /api/venues/reset` | `{platform_name_norm}`：改回 `pending`，清空 `canonical_id` |
 | `POST /api/venues/assign` 的 `coord` | `{platform_name_norm, coord:{name, lat, lng}}`：手动坐标（高德 POI 搜不到时）。前端 `parseCoord` 只收两种输入：高德坐标「经度,纬度」（小数至少 4 位），或带 `uid=` 的百度地图网页链接（`@x,y` 为百度墨卡托 → BD-09 → 高德 GCJ-02）；后端校验在上海范围内，新建 `amap_id` 为空的统一球场，名称重名 409 |
 | `POST /api/venues/restore` | `{platform_name_norm, origin, canonical_id, last_search, updated_at}`：撤销，整行写回操作前的状态（前端操作前记下）。管理页操作过的行在「待处理」里不消失、带「撤销」按钮，刷新页面后清空；撤销「改归到新 POI」不删已新建的统一球场 |
+| `POST /api/venues/prune` | 删掉没有任何馆名关联的统一球场（改归、撤销后留下的）及其 `c:<id>` 通勤缓存（id 可能被复用，不删会让新球场继承旧通勤）；正在算通勤时 409。管理页按钮显示可清理个数 |
 
 写接口对不存在的 `platform_name_norm` 返回 404，参数缺失或类型不对返回 400。`assign` 传入新 POI 时，若 `amap_name` 与已有统一球场重名而 `amap_id` 不同，唯一约束报错，接口返回 409 并提示重名（出现了再决定怎么处理）。
 

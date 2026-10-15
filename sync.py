@@ -31,6 +31,16 @@ def canonical_for_poi(conn, poi):
     return conn.execute("INSERT INTO canonical_venues(amap_name, amap_id, lat, lng) VALUES(?,?,?,?)",
                         (poi["name"], poi["amap_id"], poi["lat"], poi["lng"])).lastrowid
 
+def delete_orphan_canonicals(conn):
+    # 删掉没有任何馆名关联的统一球场（改归、撤销后留下的），连同它们的通勤缓存；返回删除个数。
+    # 通勤缓存必须一起删：id 可能被新建的统一球场复用，不删会让新球场继承旧坐标的通勤
+    n = conn.execute("DELETE FROM canonical_venues WHERE id NOT IN"
+                     " (SELECT canonical_id FROM venue_aliases WHERE canonical_id IS NOT NULL)").rowcount
+    conn.execute("DELETE FROM commute WHERE place_key LIKE 'c:%'"
+                 " AND place_key NOT IN (SELECT 'c:' || id FROM canonical_venues)")
+    conn.commit()
+    return n
+
 # 待自动搜索的馆名：pending 且未搜过或上次高德接口出错
 _RETRYABLE = "a.origin = 'pending' AND (a.last_search IS NULL OR a.last_search = 'error')"
 

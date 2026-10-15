@@ -53,6 +53,7 @@
   <div class="bar card">
     <span id="views"></span>
     <input id="q" type="text" placeholder="按平台馆名或高德名搜索，支持拼音">
+    <button id="prune" style="margin-left: auto">清理未关联的统一球场</button>
   </div>
   <section class="card">
     <table>
@@ -129,6 +130,10 @@ function render() {
   const inView = VIEWS.find(([k]) => k === view)[2];
   const shown = rows.filter((v) => (inView(v) || undo.has(v.platform_name_norm)) && (!q || hit(v.name) || hit(v.canonical?.amap_name)));
   for (const [k, , f] of VIEWS) document.querySelector(`[data-n="${k}"]`).textContent = `(${rows.filter(f).length})`;
+  const used = new Set(rows.map((v) => v.canonical?.id));
+  const orphans = canonicals.filter((c) => !used.has(c.id)).length;
+  $("prune").textContent = `清理未关联的统一球场 (${orphans})`;
+  $("prune").disabled = !orphans;
   $("tbody").innerHTML = shown.map(rowHtml).join("") ||
     `<tr><td colspan="6" class="muted">${view === "todo" && !q ? "没有待处理的场馆 🎉" : "没有匹配的场馆"}</td></tr>`;
   if (editing) {  // 重绘后恢复编辑区
@@ -264,6 +269,19 @@ $("tbody").addEventListener("click", (e) => {
 const rerender = () => { editing = null; render(); };
 document.querySelectorAll("input[name=view]").forEach((el) => el.addEventListener("change", rerender));
 $("q").addEventListener("input", rerender);
+// 改归、撤销后留下的统一球场没有馆名指向它，一键删掉（连同通勤缓存）
+$("prune").addEventListener("click", async () => {
+  if (!confirm(`删除 ${$("prune").textContent.match(/\d+/)[0]} 个没有任何馆名关联的统一球场？\n撤销记录里还指向它们的操作将不能再撤销。`)) return;
+  try {
+    const r = await api("/api/venues/prune", {});
+    await load();
+    const ids = new Set(canonicals.map((c) => c.id));  // 撤销目标已被删的，撤销按钮去掉
+    for (const [norm, prev] of undo) if (prev.canonical_id != null && !ids.has(prev.canonical_id)) undo.delete(norm);
+    render();
+    $("status").className = "ok";
+    $("status").textContent = `已删除 ${r.deleted} 个未关联的统一球场`;
+  } catch (e) { $("status").className = "err"; $("status").textContent = "清理失败：" + e.message; }
+});
 
 load().catch((e) => { $("status").className = "err"; $("status").textContent = "加载失败：" + e.message; });
 </script>

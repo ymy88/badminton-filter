@@ -319,6 +319,17 @@ def test_restore_errors():
     assert c.post("/api/venues/restore", json=dict(base, origin="manual", canonical_id=99)).status_code == 404
     assert _row(c, "野馆")["origin"] == "pending"
 
+def test_prune_deletes_unreferenced_canonicals_and_their_commute():
+    # 万体汇(2) 没有馆名关联 → 连同通勤缓存删掉；大华店(1) 有关联 → 保留
+    conn, c = _venue_app()
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','c:1',10,20,500)")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:flashx:9',10,20,500)")
+    conn.commit()
+    assert c.post("/api/venues/prune").get_json() == {"ok": True, "deleted": 1}
+    assert [r[0] for r in conn.execute("SELECT id FROM canonical_venues")] == [1]
+    assert sorted(r[0] for r in conn.execute("SELECT place_key FROM commute")) == ["c:1", "v:flashx:9"]
+    assert c.post("/api/venues/prune").get_json() == {"ok": True, "deleted": 0}
+
 def test_amap_search(monkeypatch):
     seen = {}
     monkeypatch.setattr(commute, "poi_search", lambda q, limit=1: seen.update(q=q, limit=limit) or [{"amap_id": "B1"}])
