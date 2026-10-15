@@ -14,6 +14,7 @@
   main { padding: 16px; }
   .bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 14px; margin-bottom: 12px; }
   .bar label { margin-right: 10px; }
+  .bar .vsep { margin-right: 10px; }
   #q { width: 260px; }
   section { padding: 8px; overflow-x: auto; }
   td.ops { white-space: nowrap; }
@@ -50,10 +51,7 @@
 </header>
 <main>
   <div class="bar card">
-    <span>
-      <label><input type="radio" name="view" value="todo" checked>待处理 <span id="nTodo"></span></label>
-      <label><input type="radio" name="view" value="all">全部 <span id="nAll"></span></label>
-    </span>
+    <span id="views"></span>
     <input id="q" type="text" placeholder="按平台馆名或高德名搜索，支持拼音">
   </div>
   <section class="card">
@@ -80,6 +78,15 @@ const mapLink = (name, lat, lng) => lat == null ? "" :
 const localTime = (t) => new Date(t.replace(" ", "T") + "Z").toLocaleString("zh-CN", { hour12: false });
 // 待处理：还有球局的未归类（球局已过期的不再归类，不催）+ 可疑的自动归类
 const isTodo = (v) => (v.origin === "pending" && v.game_count > 0) || v.suspect.length > 0;
+// 状态：可疑的自动归类单列一类
+const LABEL = { pending: "未归类", suspect: "自动·可疑", auto: "自动", confirmed: "已确认", manual: "手动", none: "高德搜不到" };
+const stKey = (v) => v.origin === "auto" && v.suspect.length ? "suspect" : v.origin;
+// 顶部视图：待处理 / 全部 / 按状态
+const VIEWS = [["todo", "待处理", isTodo], ["all", "全部", () => true],
+  ...Object.entries(LABEL).map(([k, label]) => [k, label, (v) => stKey(v) === k])];
+$("views").innerHTML = VIEWS.map(([k, label], i) =>
+  `<label><input type="radio" name="view" value="${k}"${i ? "" : " checked"}>${label} <span class="muted" data-n="${k}"></span></label>`
+  + (k === "all" ? '<span class="muted vsep">|</span>' : "")).join("");
 
 function status(v) {
   if (v.origin === "pending")
@@ -90,8 +97,7 @@ function status(v) {
       : "还没搜索（点主页「算通勤」）"}</span>`;
   if (v.origin === "auto" && v.suspect.length)
     return `<span class="st suspect">自动·可疑</span>${v.suspect.map((s) => `<span class="why">${esc(s)}</span>`).join("")}`;
-  const label = { auto: "自动", confirmed: "已确认", manual: "手动", none: "高德搜不到" }[v.origin];
-  return `<span class="st ${v.origin}">${label}</span>`;
+  return `<span class="st ${v.origin}">${LABEL[v.origin]}</span>`;
 }
 
 function ops(v) {
@@ -120,9 +126,9 @@ function render() {
   const view = document.querySelector("input[name=view]:checked").value;
   const q = $("q").value.trim();
   const hit = (s) => s && pyMatch(s, q, PY[s]);
-  const shown = rows.filter((v) => (view === "all" || isTodo(v) || undo.has(v.platform_name_norm)) && (!q || hit(v.name) || hit(v.canonical?.amap_name)));
-  $("nTodo").textContent = `(${rows.filter(isTodo).length})`;
-  $("nAll").textContent = `(${rows.length})`;
+  const inView = VIEWS.find(([k]) => k === view)[2];
+  const shown = rows.filter((v) => (inView(v) || undo.has(v.platform_name_norm)) && (!q || hit(v.name) || hit(v.canonical?.amap_name)));
+  for (const [k, , f] of VIEWS) document.querySelector(`[data-n="${k}"]`).textContent = `(${rows.filter(f).length})`;
   $("tbody").innerHTML = shown.map(rowHtml).join("") ||
     `<tr><td colspan="6" class="muted">${view === "todo" && !q ? "没有待处理的场馆 🎉" : "没有匹配的场馆"}</td></tr>`;
   if (editing) {  // 重绘后恢复编辑区
