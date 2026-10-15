@@ -94,13 +94,16 @@ assert.equal(applyFilters([g({ raw_text: "练球" }), g({ raw_text: "双打" })]
 assert.equal(applyFilters([g({ venue_name: "万体汇" })], { venueInclude: [""] }).length, 1);
 
 // 坐标解析：高德原样；经纬度顺序不限；中文逗号/空格；百度坐标换算（对照 coordtransform 的公开样例）
-assert.deepEqual(parseCoord("121.43561,31.189399"), { lat: 31.189399, lng: 121.43561 });
-assert.deepEqual(parseCoord("31.189399， 121.43561"), { lat: 31.189399, lng: 121.43561 });
-assert.deepEqual(parseCoord(" 121.43561 31.189399 "), { lat: 31.189399, lng: 121.43561 });
+const ok = { lat: 31.189399, lng: 121.43561, coarse: false };
+assert.deepEqual(parseCoord("121.43561,31.189399"), ok);
+assert.deepEqual(parseCoord("31.189399， 121.43561"), ok);
+assert.deepEqual(parseCoord(" 121.43561 31.189399 "), ok);
+assert.equal(parseCoord("121.50,31.24").coarse, true);   // 拾取器未登录只给 2 位小数
+assert.equal(parseCoord("121.5012,31.2400").coarse, false);
 assert.equal(parseCoord("121.4"), null);
 assert.equal(parseCoord("121.4,abc"), null);
 assert.equal(parseCoord(""), null);
-assert.deepEqual(parseCoord("116.404,39.915", "bd09"), { lat: 39.908657, lng: 116.397627 });
+assert.deepEqual(parseCoord("116.404000,39.915000", "bd09"), { lat: 39.908657, lng: 116.397627, coarse: false });
 
 console.log("filters.js OK");
 

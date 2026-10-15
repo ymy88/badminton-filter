@@ -176,6 +176,7 @@ function openEditor(tr) {
   const coordPreview = () => {
     const ll = parseCoord(ed.querySelector(".cll").value, ed.querySelector(".csys").value);
     ed.querySelector(".cprev").innerHTML = !ed.querySelector(".cll").value.trim() ? ""
+      : ll?.coarse ? ' → <span class="err">精度不够：小数至少 4 位（坐标拾取器要登录并认证才显示完整坐标）</span>'
       : ll ? ` → 高德坐标 ${ll.lng},${ll.lat}${mapLink(ed.querySelector(".cname").value || "场馆", ll.lat, ll.lng)}`
       : ' → <span class="err">格式不对，应为「经度,纬度」</span>';
   };
@@ -232,8 +233,10 @@ $("tbody").addEventListener("click", (e) => {
     else if (a === "coord") {
       const name = tr.querySelector(".cname").value.trim();
       const ll = parseCoord(tr.querySelector(".cll").value, tr.querySelector(".csys").value);
-      if (!name || !ll) { $("status").className = "err"; $("status").textContent = "手动坐标需要名称和「经度,纬度」"; }
-      else assign(norm, { coord: { name, ...ll } }, name);
+      if (!name || !ll || ll.coarse) {
+        $("status").className = "err";
+        $("status").textContent = ll?.coarse ? "坐标精度不够：小数至少 4 位" : "手动坐标需要名称和「经度,纬度」";
+      } else assign(norm, { coord: { name, lat: ll.lat, lng: ll.lng } }, name);
     }
     else if (a === "confirm") act(norm, "/api/venues/confirm");
     else if (a === "reset") act(norm, "/api/venues/reset");

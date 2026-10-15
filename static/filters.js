@@ -141,14 +141,17 @@ function bd09ToGcj02(lng, lat) {
   return [z * Math.cos(theta), z * Math.sin(theta)];
 }
 
-// 粘贴的坐标串 → 高德坐标 {lat, lng}；sys="bd09" 时从百度坐标换算。
-// 逗号/空格分隔，经纬度顺序不限（大于 90 的是经度）；解析不了返回 null
+// 粘贴的坐标串 → 高德坐标 {lat, lng, coarse}；sys="bd09" 时从百度坐标换算。
+// 逗号/空格分隔，经纬度顺序不限（大于 90 的是经度）；解析不了返回 null。
+// coarse：任一数小数不足 4 位（坐标拾取器未登录/未认证只显示 2 位，误差可达几百米）
 function parseCoord(text, sys = "gcj02") {
-  const nums = (text || "").split(/[\s,，]+/).filter(Boolean).map(Number);
+  const parts = (text || "").split(/[\s,，]+/).filter(Boolean);
+  const nums = parts.map(Number);
   if (nums.length !== 2 || !nums.every(Number.isFinite)) return null;
   let [lng, lat] = nums[0] > 90 ? nums : [nums[1], nums[0]];
   if (sys === "bd09") [lng, lat] = bd09ToGcj02(lng, lat);
-  return { lat: +lat.toFixed(6), lng: +lng.toFixed(6) };
+  const coarse = parts.some((p) => (p.split(".")[1] || "").length < 4);
+  return { lat: +lat.toFixed(6), lng: +lng.toFixed(6), coarse };
 }
 
 export { applyFilters, sortGames, pyMatch, parseTags, rankCandidates, parseCoord };
