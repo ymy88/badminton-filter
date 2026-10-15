@@ -159,12 +159,15 @@ function bdMercatorToBd09(x, y) {
   return [c[0] + c[1] * Math.abs(x), lat];
 }
 
-// 粘贴的坐标串 → 高德坐标 {lat, lng, coarse}；sys="bd09" 时从百度坐标换算。
-// 逗号/空格分隔，经纬度顺序不限（大于 90 的是经度）；解析不了返回 null。
+// 手动坐标输入 → 高德坐标 {lat, lng, coarse}；解析不了返回 null。两种输入：
+// 1. 百度地图网页链接（map.baidu.com/…/@x,y,19z?uid=…）：@ 后是地图中心的百度墨卡托坐标，换算成高德坐标；
+//    必须带 uid（点开了某个地点），否则地图中心只是默认城市视图
+// 2. 高德坐标：逗号/空格分隔，经纬度顺序不限（大于 90 的是经度）
 // coarse：任一数小数不足 4 位（坐标拾取器未登录/未认证只显示 2 位，误差可达几百米）
-// 也认百度地图网页链接（map.baidu.com/…/@x,y,19z）：@ 后是地图中心的百度墨卡托坐标，与 sys 无关
-function parseCoord(text, sys = "gcj02") {
+// 不收百度坐标数字：百度拾取器同样只给 2 位小数，换算前就已经不准
+function parseCoord(text) {
   const m = /baidu\.com\/.*@(-?[\d.]+),(-?[\d.]+)/.exec(text || "");
+  if (m && !/[?&]uid=/.test(text)) return null;
   if (m) {
     const [lng, lat] = bd09ToGcj02(...bdMercatorToBd09(+m[1], +m[2]));
     return { lat: +lat.toFixed(6), lng: +lng.toFixed(6), coarse: false };
@@ -172,8 +175,7 @@ function parseCoord(text, sys = "gcj02") {
   const parts = (text || "").split(/[\s,，]+/).filter(Boolean);
   const nums = parts.map(Number);
   if (nums.length !== 2 || !nums.every(Number.isFinite)) return null;
-  let [lng, lat] = nums[0] > 90 ? nums : [nums[1], nums[0]];
-  if (sys === "bd09") [lng, lat] = bd09ToGcj02(lng, lat);
+  const [lng, lat] = nums[0] > 90 ? nums : [nums[1], nums[0]];
   const coarse = parts.some((p) => (p.split(".")[1] || "").length < 4);
   return { lat: +lat.toFixed(6), lng: +lng.toFixed(6), coarse };
 }

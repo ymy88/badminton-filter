@@ -156,13 +156,10 @@ function openEditor(tr) {
     <div class="pick canon"></div><div class="pick amap"></div>
     <div class="row"><span class="nowrap">高德搜不到？手动指定坐标：</span>
       <input class="cname" type="text" value="${esc(v.name)}" placeholder="名称">
-      <input class="cll" type="text" placeholder="经度,纬度 或 百度地图链接">
-      <select class="csys"><option value="gcj02">高德坐标</option><option value="bd09">百度坐标</option></select>
+      <input class="cll" type="text" placeholder="高德坐标 或 百度地图链接">
       <button data-act="coord">保存坐标</button></div>
-    <div class="muted">从 <a href="https://lbs.amap.com/tools/picker" target="_blank" rel="noopener">高德坐标拾取器</a>
-      或 <a href="https://api.map.baidu.com/lbsapi/getpoint/" target="_blank" rel="noopener">百度坐标拾取</a>
-      搜到场馆、点一下复制坐标（百度坐标会自动换算）；
-      也可以在 <a href="https://map.baidu.com/" target="_blank" rel="noopener">百度地图</a> 点开场馆后（别拖动地图）把地址栏链接整条粘进来<span class="cprev"></span></div></div></td>`;
+    <div class="muted">在 <a href="https://map.baidu.com/" target="_blank" rel="noopener">百度地图</a> 点开场馆（别拖动地图），把地址栏链接整条粘进来；
+      或从 <a href="https://lbs.amap.com/tools/picker" target="_blank" rel="noopener">高德坐标拾取器</a> 复制坐标（要登录认证才有完整小数）<span class="cprev"></span></div></div></td>`;
   tr.after(ed);
   const input = ed.querySelector("input");
   const showCanon = () => {
@@ -175,16 +172,25 @@ function openEditor(tr) {
   input.addEventListener("input", showCanon);
   // 手动坐标：边输入边预览换算后的高德坐标，保存前可点地图链接核对位置
   const coordPreview = () => {
-    const ll = parseCoord(ed.querySelector(".cll").value, ed.querySelector(".csys").value);
-    ed.querySelector(".cprev").innerHTML = !ed.querySelector(".cll").value.trim() ? ""
-      : ll?.coarse ? ' → <span class="err">精度不够：小数至少 4 位（坐标拾取器要登录并认证才显示完整坐标）</span>'
-      : ll ? ` → 高德坐标 ${ll.lng},${ll.lat}${mapLink(ed.querySelector(".cname").value || "场馆", ll.lat, ll.lng)}`
-      : ' → <span class="err">格式不对，应为「经度,纬度」或百度地图链接</span>';
+    const text = ed.querySelector(".cll").value;
+    const ll = parseCoord(text), err = coordError(text, ll);
+    ed.querySelector(".cprev").innerHTML = !text.trim() ? ""
+      : err ? ` → <span class="err">${err}</span>`
+      : ` → 高德坐标 ${ll.lng},${ll.lat}${mapLink(ed.querySelector(".cname").value || "场馆", ll.lat, ll.lng)}`;
   };
-  ed.querySelectorAll(".cll, .csys, .cname").forEach((el) => el.addEventListener("input", coordPreview));
+  ed.querySelectorAll(".cll, .cname").forEach((el) => el.addEventListener("input", coordPreview));
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") searchAmap(ed); });
   showCanon();
   input.focus();
+}
+
+// 手动坐标输入的问题说明；没问题返回 ""
+function coordError(text, ll) {
+  if (/j\.map\.baidu\.com/.test(text)) return "百度短链接里没有坐标：先在浏览器打开它，等页面显示出场馆后，复制地址栏的完整链接";
+  if (!ll && /baidu\.com/.test(text)) return "这个百度链接没定位到场馆：等页面显示出场馆详情、地址栏里出现 uid= 后再复制";
+  if (!ll) return "格式不对，应为高德坐标「经度,纬度」或百度地图链接（地址栏里带 @ 的那种）";
+  if (ll.coarse) return "精度不够：小数至少 4 位（坐标拾取器要登录并认证才显示完整坐标）";
+  return "";
 }
 
 async function searchAmap(ed) {
@@ -233,10 +239,11 @@ $("tbody").addEventListener("click", (e) => {
     else if (a === "amap") searchAmap(tr);
     else if (a === "coord") {
       const name = tr.querySelector(".cname").value.trim();
-      const ll = parseCoord(tr.querySelector(".cll").value, tr.querySelector(".csys").value);
-      if (!name || !ll || ll.coarse) {
+      const text = tr.querySelector(".cll").value;
+      const ll = parseCoord(text), err = name ? coordError(text, ll) : "手动坐标需要名称";
+      if (err) {
         $("status").className = "err";
-        $("status").textContent = ll?.coarse ? "坐标精度不够：小数至少 4 位" : "手动坐标需要名称和「经度,纬度」";
+        $("status").textContent = err;
       } else assign(norm, { coord: { name, lat: ll.lat, lng: ll.lng } }, name);
     }
     else if (a === "confirm") act(norm, "/api/venues/confirm");
