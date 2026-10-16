@@ -48,15 +48,25 @@ def classify_pending(conn, progress=lambda msg: None):
     # 当前球局涉及的 pending 馆名逐个搜高德 POI（按馆名，不按球局），取第一条。
     # 只搜未搜过的和上次接口出错的；结果记进 last_search：
     # error 接口出错（下次重试）/ empty 没搜到、dup 与已有统一球场重名（都不再自动搜，留给管理页手动处理）
+    # 闪动有坐标的馆名：搜到的 POI 离闪动坐标超过 FAR_M → 不要，改在闪动坐标附近按名字搜；
+    # 附近也没有 → empty（通勤照样按闪动坐标算）。例：「上海对外经贸大学」全市搜到松江校区，附近搜是古北校区
     # UPDATE 都带 origin='pending'：搜索期间用户若在管理页改过，不覆盖
     names = conn.execute(
         "SELECT a.platform_name_norm n, MIN(g.venue_name) raw FROM venue_aliases a"
         " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
         f" WHERE {_RETRYABLE} GROUP BY a.platform_name_norm").fetchall()
+    fx = {}
+    for g in conn.execute("SELECT platform_name_norm n, lat, lng FROM games"
+                          " WHERE source = 'flashx' AND lat IS NOT NULL AND lng IS NOT NULL"):
+        fx.setdefault(g["n"], []).append((g["lat"], g["lng"]))
     for i, r in enumerate(names, 1):
         cid, result = None, "empty"
+        pts = fx.get(r["n"])
+        fx_ll = (statistics.median(p[0] for p in pts), statistics.median(p[1] for p in pts)) if pts else None
         try:
             pois = commute.poi_search(r["raw"])
+            if pois and fx_ll and venues.distance_m(fx_ll, (pois[0]["lat"], pois[0]["lng"])) > venues.FAR_M:
+                pois = commute.poi_search(r["raw"], near=fx_ll, radius=venues.FAR_M)
         except commute.AmapError:
             pois, result = [], "error"
         if pois:

@@ -62,6 +62,13 @@ def test_poi_search_parses(monkeypatch):
                   "district": "徐汇区", "address": "漕溪北路1111号"},
                  {"amap_id": "B3", "name": "无地址", "lat": 31.2, "lng": 121.5, "district": "", "address": ""}]
 
+def test_poi_search_near_uses_around(monkeypatch):
+    # near=(lat, lng) → 周边搜索，location 是「经度,纬度」
+    seen = {}
+    monkeypatch.setattr(commute, "_amap_get", lambda url, params: seen.update(params, url=url) or {"status": "1", "pois": []})
+    commute.poi_search("外贸", near=(31.2, 121.4), radius=1000)
+    assert seen["url"].endswith("/v3/place/around") and seen["location"] == "121.4,31.2" and seen["radius"] == 1000
+
 def test_poi_search_empty(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get", lambda url, params: {"status": "1", "pois": []})
     assert commute.poi_search("不存在") == []

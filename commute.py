@@ -55,11 +55,16 @@ def geocode(address):
     except (ValueError, KeyError, IndexError, AttributeError, TypeError):
         return None
 
-def poi_search(name, limit=1):
+def poi_search(name, limit=1, near=None, radius=1000):
     # 按名字搜高德 POI，返回前 limit 条：名称 + POI id（跨平台去重键）+ 坐标 + 所在区 + 地址；
+    # near=(lat, lng) 时改为周边搜索：只在该点 radius 米内找（比全市搜索匹配更严，搜不到的多）。
     # 搜不到返回 []，接口出错抛 AmapError。高德空字段返回 [] 而非 ""，统一成空串
-    d = _amap_get(f"{BASE}/v3/place/text",
-                  {"keywords": name, "city": CITY, "citylimit": "true", "offset": limit})
+    if near:
+        d = _amap_get(f"{BASE}/v3/place/around", {"keywords": name, "location": f"{near[1]},{near[0]}",
+                                                   "radius": radius, "offset": limit})
+    else:
+        d = _amap_get(f"{BASE}/v3/place/text",
+                      {"keywords": name, "city": CITY, "citylimit": "true", "offset": limit})
     if d is None:
         raise AmapError("高德接口出错")
     out = []

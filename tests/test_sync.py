@@ -5,7 +5,7 @@ def _g(**kw):
     base = dict(source="flashx", source_id="1", title="t", date="2999-01-01",  # 远期，避开 upsert 清理过期
                 start_time="19:00", end_time="21:00", duration_min=120,
                 venue_name="馆", venue_key="flashx:1",
-                price=30.0, applied_num=0, total_num=12, lat=31.1, lng=121.5,
+                price=30.0, applied_num=0, total_num=12, lat=31.18, lng=121.43,  # 与 POI 同点
                 raw_text="t", tags="[]", organizer="o", club_name="c", detail_ref="1")
     base.update(kw); return base
 
@@ -164,6 +164,30 @@ def test_classify_does_not_override_manual_set_meanwhile(monkeypatch):
     sync.classify_pending(conn)
     a = _alias(conn, "馆")
     assert a["origin"] == "manual" and a["canonical_id"] == 9
+
+def test_classify_far_from_flashx_coord_searches_nearby(monkeypatch):
+    # 全市搜到的 POI 离闪动坐标 >1km → 改在闪动坐标附近搜；附近也没有 → empty（不用远处那个）
+    far = dict(POI, amap_id="B9", name="松江校区", lat=31.04, lng=121.21)
+    gubei = dict(POI, amap_id="B2", name="古北校区", lat=31.2074, lng=121.3985)
+    conn = db.connect(":memory:"); db.init_schema(conn)
+    sync.upsert_games(conn, [_g(source_id="1", venue_name="外贸", lat=31.2074, lng=121.3986),
+                             _g(source_id="2", venue_name="地图位置", venue_key="flashx:2", lat=31.18, lng=121.438),
+                             _g(source_id="3", venue_name="近", venue_key="flashx:3")])
+    calls = []
+    def search(n, limit=1, near=None, radius=1000):
+        calls.append((n, near, radius))
+        if near:
+            return [gubei] if n == "外贸" else []
+        return [POI] if n == "近" else [far]
+    monkeypatch.setattr(sync.commute, "poi_search", search)
+    sync.classify_pending(conn)
+    c = {r["amap_id"]: r["id"] for r in conn.execute("SELECT id, amap_id FROM canonical_venues")}
+    assert _alias(conn, "外贸")["canonical_id"] == c["B2"]
+    a = _alias(conn, "地图位置")
+    assert a["origin"] == "pending" and a["last_search"] == "empty" and "B9" not in c
+    assert _alias(conn, "近")["canonical_id"] == c["B1"]
+    assert ("近", None, 1000) in calls and not any(n == "近" and nr for n, nr, _ in calls)  # 不远就不再搜附近
+    assert ("外贸", (31.2074, 121.3986), 1000) in calls
 
 def test_classify_duplicate_amap_name_stays_pending(monkeypatch):
     # 新 POI 与已有统一球场同名不同 id（唯一约束冲突）→ 留在待处理

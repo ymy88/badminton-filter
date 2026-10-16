@@ -129,6 +129,7 @@ lat, lng   平台原始坐标          origin                           amap_id 
 
 1. **归类**：取 `venue_aliases` 中 `origin = pending`、`last_search` 为空或 `error`，且当前 `games` 里有球局的馆名，逐个处理（按馆名，不按球局）：
    - 用该馆名下任一原样 `venue_name` 搜高德 POI，取第一条结果。
+   - 该馆名在闪动上有坐标（取中位数）且第一条结果离它超过 1km（`FAR_M`）：不要这条，改用高德周边搜索（`/v3/place/around`，闪动坐标 1km 内按馆名搜）取第一条；周边也没有 → `empty`，通勤按闪动坐标算。周边搜索匹配比全市搜索严，常漏掉正确 POI，所以只作远距离时的补救，不作首选。例：「上海对外经贸大学」全市搜到松江校区（24.9km），周边搜到古北校区（4m）。
    - POI 的 `amap_id` 已存在于 `canonical_venues` → 归到该统一球场；否则新建统一球场。
    - 更新该行为 `origin = auto`、填 `canonical_id`。
    - 没归上 → 保持 `pending`，`last_search` 记 `error`（`poi_search` 抛 `AmapError`）、`empty`（返回空列表）或 `dup`（新建统一球场时 `amap_name` 唯一约束冲突），并更新 `updated_at`。
