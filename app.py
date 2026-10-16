@@ -305,7 +305,7 @@ def create_app(conn, config, db_path=None):
     @app.get("/api/commute/status")
     def commute_status():
         return jsonify({"computing": compute_lock.locked(), "progress": compute_box["progress"],
-                        "commute_places": conn.execute("SELECT COUNT(*) c FROM commute").fetchone()["c"],
+                        "commute_places": conn.execute("SELECT COUNT(DISTINCT place_key) c FROM commute").fetchone()["c"],
                         "pending": sync.pending_count(conn), "unmatched": sync.unmatched_count(conn)})
 
     @app.post("/api/creds/capture")

@@ -199,6 +199,23 @@ def test_compute_pending_classifies_then_fills_commute(tmp_path, monkeypatch):
     assert conn.execute("SELECT drive_min FROM commute WHERE place_key=?", (f"c:{cid}",)).fetchone()[0] == 18
     assert prog == ["归类场馆 1/1", "算各场馆通勤 1/1"]
 
+def test_compute_pending_progress_counts_only_missing_commute(tmp_path, monkeypatch):
+    # 进度分母只数缺通勤的场馆：家+公司都齐的跳过；只齐了一个出发地的仍要算
+    p = str(tmp_path / "t.db")
+    conn = db.connect(p); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.2,121.4),('company','司',31.1,121.3)")
+    sync.upsert_games(conn, [_g(source_id=str(i), venue_name=f"馆{i}", venue_key=f"flashx:{i}") for i in (1, 2, 3)])
+    conn.execute("UPDATE venue_aliases SET origin='none'")
+    conn.executemany("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES(?,?,10,20,500)",
+                     [("home", "v:flashx:1"), ("company", "v:flashx:1"), ("home", "v:flashx:2")])
+    conn.commit(); conn.close()
+    calls = []
+    monkeypatch.setattr(sync.commute, "route_minutes", lambda o, d: calls.append(o) or {"drive_min": 1, "transit_min": 2, "walk_m": 3})
+    prog = []
+    sync.compute_pending(p, {}, progress=prog.append)
+    assert prog == ["算各场馆通勤 1/2", "算各场馆通勤 2/2"]
+    assert len(calls) == 3  # 馆2 补公司、馆3 家+公司
+
 def test_pending_count_counts_pending_names_and_missing_commute():
     conn = db.connect(":memory:"); db.init_schema(conn)
     conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','x',31.0,121.0)")

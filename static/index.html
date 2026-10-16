@@ -335,13 +335,13 @@ function pollCommute(baseMsg) {
     catch { _pollTimer = setTimeout(tick, 2000); return; }
     if (s.commute_places !== last) { last = s.commute_places; await loadGames(); }
     if (s.computing) {
-      $("status").textContent = `${pre}通勤后台计算中… ${s.progress || "准备中"}（已有通勤 ${s.commute_places} 条）`;
+      $("status").textContent = `${pre}通勤后台计算中… ${s.progress || "准备中"}（已有 ${s.commute_places} 个场馆的通勤）`;
       _pollTimer = setTimeout(tick, 2000);
     } else {
       await loadGames();
       $("status").textContent = ((s.pending > 0)
         ? `${pre}还有 ${s.pending} 个场馆通勤没算出（高德接口出错），再点「算通勤」重试`
-        : `${pre}通勤已算完（${s.commute_places}）`)
+        : `${pre}通勤已算完（${s.commute_places} 个场馆）`)
         + (s.unmatched > 0 ? `；${s.unmatched} 个场馆高德没自动搜到，去「球馆管理」处理` : "");
       $("commuteBtn").disabled = false;  // 通勤算完才放开按钮
     }

@@ -90,6 +90,16 @@ def commute_places(conn):
         places.setdefault(commute.place_key(None, r["venue_key"]), commute.amap_coord(r["lat"], r["lng"]))
     return places
 
+def incomplete_places(conn, origins):
+    # commute_places 中还缺通勤的：任一出发地的驾车/公交/步行没算齐；没有出发地时无从算起，返回空
+    if not origins:
+        return {}
+    done = {r["place_key"] for r in conn.execute(
+        "SELECT place_key FROM commute WHERE drive_min IS NOT NULL AND transit_min IS NOT NULL AND walk_m IS NOT NULL"
+        f" AND origin IN ({','.join('?' * len(origins))}) GROUP BY place_key HAVING COUNT(*) = ?",
+        (*origins, len(origins)))}
+    return {pk: dest for pk, dest in commute_places(conn).items() if pk not in done}
+
 def _ensure_commute(conn, pk, dest, origins_ll):
     # 给场馆 pk 补各出发地通勤(驾车/公交/步行)：三项齐全才跳过；
     # 部分缺失(某路线上次失败)会重算，已成功的字段保留，逐次补齐；全失败不写，留待重试
@@ -182,7 +192,7 @@ def compute_pending(db_path, config, progress=lambda msg: None):
     try:
         classify_pending(conn, progress)
         origins_ll = _origins_ll(conn)
-        places = commute_places(conn)
+        places = incomplete_places(conn, list(origins_ll))  # 进度只数真正要算的
         for i, (pk, dest) in enumerate(places.items(), 1):
             try:
                 _ensure_commute(conn, pk, dest, origins_ll)
@@ -200,13 +210,7 @@ def pending_count(conn):
     n = conn.execute("SELECT COUNT(DISTINCT a.platform_name_norm) c FROM venue_aliases a"
                      " JOIN games g ON g.platform_name_norm = a.platform_name_norm"
                      f" WHERE {_RETRYABLE}").fetchone()["c"]
-    for pk in commute_places(conn):
-        complete = conn.execute(
-            "SELECT COUNT(*) c FROM commute WHERE place_key=? AND drive_min IS NOT NULL"
-            " AND transit_min IS NOT NULL AND walk_m IS NOT NULL", (pk,)).fetchone()["c"]
-        if complete < len(origins):
-            n += 1
-    return n
+    return n + len(incomplete_places(conn, origins))
 
 def unmatched_count(conn):
     # 高德自动搜不到（没搜到/重名）、要去管理页手动处理的馆名数（只算还有球局的）
