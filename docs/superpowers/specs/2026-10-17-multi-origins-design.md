@@ -33,7 +33,7 @@
 
 ```sql
 CREATE TABLE IF NOT EXISTS origins(
-  key TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT, lat REAL, lng REAL,
+  key TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', address TEXT, lat REAL, lng REAL,
   show INTEGER NOT NULL DEFAULT 1,   -- 1 = 在表格里显示成列
   pos INTEGER NOT NULL DEFAULT 0);   -- 排列顺序，新增时取 max(pos)+1
 ```
@@ -121,14 +121,14 @@ CREATE TABLE IF NOT EXISTS origins(
 选点区抽成组件 `locPicker`，放在 `common.js`，主页和球馆管理页共用。原因：手动坐标的说明和校验改过多轮（百度链接、去掉百度坐标、短链接、`uid=`），两份拷贝下次改时容易漏一边。
 
 ```js
-locPicker(el, { query, onPick, onInput }) → { input }
+locPicker(el, { query, onPick, onInput }) → { input, slot }
 ```
 
 - `el`：容器元素，组件往里面渲染。`query`：关键字框的初始值。
 - 组件内容：关键字框 +「在高德搜索」（回车也触发，调 `/api/amap/search`）；高德候选列表（名称、所在区、地址、「地图」链接，以及「搜索中」「没搜到」「搜索失败」三种提示）；手动坐标框（高德坐标或百度地图链接，边输入边预览换算后的高德坐标和「地图」链接）+「用这个坐标」按钮 + 说明文字（百度地图点开场馆后复制地址栏链接 / 高德坐标拾取器）。
 - `onPick(p)`：点候选时 `p = {amap_id, name, lat, lng, district, address}`（即 `/api/amap/search` 返回的 POI）；点「用这个坐标」时 `p = {lat, lng}`（已是高德坐标）。手动坐标有错时组件自己在预览处显示 `coordError` 的说明，不调 `onPick`。
 - `onInput(q)`：关键字框每次输入时调，管理页用它筛「已有统一球场」候选。
-- 返回 `{ input }`（关键字框元素），调用方用来 focus。
+- 返回 `{ input, slot }`：`input` 是关键字框，调用方用来 focus；`slot` 是搜索框和高德候选之间的空容器，管理页把「已有统一球场」候选放进去（保持现在的布局：先看已有的，再看高德的）。
 - `coordError` 和 `mapLink` 一起移进 `common.js`；`mapLink` 管理页其他地方也在用，照样导出。
 
 **留在各自页面、不进组件的：**
