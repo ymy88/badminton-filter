@@ -392,12 +392,16 @@ $("addrBtn").onclick = () => {
 $("addrSave").onclick = async () => {
   const noLoc = draft.find((d) => !d.key && !d.loc);
   if (noLoc) { $("addrMsg").className = "err"; $("addrMsg").textContent = `先给「${noLoc.name || "新地址"}」选位置`; return; }
+  // 按发送时的条目对象回填结果：请求途中删行/加行会让下标错位，把 key 挂到别的出发地上
+  const sent = draft.slice();
   let res;
+  $("addrSave").disabled = true;
   try {
-    res = await api("/api/origins", { origins: draft.map((d) => ({ key: d.key, name: d.name, show: d.show, ...(d.loc ? { loc: d.loc } : {}) })) });
+    res = await api("/api/origins", { origins: sent.map((d) => ({ key: d.key, name: d.name, show: d.show, ...(d.loc ? { loc: d.loc } : {}) })) });
   } catch (e) { $("addrMsg").className = "err"; $("addrMsg").textContent = "保存失败：" + e.message; return; }
+  finally { $("addrSave").disabled = false; }
   // 成功的条目记下 key、清掉未保存标记；失败的保留输入，提示原因
-  res.forEach((r, i) => Object.assign(draft[i], r.ok ? { key: r.key, loc: undefined, msg: "已保存", cls: "ok" } : { msg: r.msg, cls: "err" }));
+  res.forEach((r, i) => Object.assign(sent[i], r.ok ? { key: r.key, loc: undefined, msg: "已保存", cls: "ok" } : { msg: r.msg, cls: "err" }));
   $("addrMsg").textContent = "";
   picking = -1;
   renderAddr();

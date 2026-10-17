@@ -214,6 +214,9 @@ def test_save_origins_409_while_computing(monkeypatch, tmp_path):
     assert conn.execute("SELECT COUNT(*) c FROM origins").fetchone()["c"] == 2
     r = c.post("/api/origins", json={"origins": [{**HOME, "name": "老家"}, COMPANY]})            # 只改名不受限
     assert r.status_code == 200 and r.get_json()[0]["ok"] is True
+    # 新增不受限：后台快照里没有新出发地，算完的补一轮会算它
+    r = c.post("/api/origins", json={"origins": [HOME, COMPANY, {"name": "父母家", "show": True, "loc": LOC}]})
+    assert r.status_code == 200 and r.get_json()[2]["ok"] is True
     gate.set()
 
 def test_capture_reports_returned_platforms(monkeypatch):

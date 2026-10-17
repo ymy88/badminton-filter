@@ -229,8 +229,9 @@ def create_app(conn, config, db_path=None):
             return jsonify({"ok": False, "msg": "body 须为 {origins: [...]}"}), 400
         old = {r["key"] for r in conn.execute("SELECT key FROM origins")}
         gone = old - {x.get("key") for x in items}
-        # 后台算通勤按开始时的坐标快照写回，期间删除/改位置会留下孤儿行或旧位置的通勤
-        if (gone or any(x.get("loc") is not None for x in items)) and compute_lock.locked():
+        # 后台算通勤按开始时的坐标快照写回，期间删除/改位置会留下孤儿行或旧位置的通勤；
+        # 新增不拦：快照里没有它，前端保存后触发的算通勤会让后台跑完再补一轮
+        if (gone or any(x.get("key") is not None and x.get("loc") is not None for x in items)) and compute_lock.locked():
             return jsonify({"ok": False, "msg": "正在算通勤，等算完再删除或改位置"}), 409
         for k in gone:
             conn.execute("DELETE FROM origins WHERE key=?", (k,))
