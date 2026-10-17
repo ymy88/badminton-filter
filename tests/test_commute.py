@@ -40,12 +40,6 @@ def test_route_minutes_missing_duration(monkeypatch):
     monkeypatch.setattr(commute, "_amap_get", fake)
     assert commute.route_minutes("121,31", "121.5,31.2") == {"drive_min": None, "transit_min": None, "walk_m": None}
 
-# 评审修复：geocode 的 location 格式异常时返回 None，不抛
-def test_geocode_bad_location(monkeypatch):
-    monkeypatch.setattr(commute, "_amap_get",
-                        lambda url, params: {"status": "1", "geocodes": [{"location": "bad"}]})
-    assert commute.geocode("某地址") is None
-
 def test_poi_search_parses(monkeypatch):
     # 名字 + id + 坐标(lng,lat → lat,lng) + 所在区 + 地址；高德空字段是 [] → 空串；坏条目跳过
     seen = {}

@@ -1,10 +1,8 @@
 # app.py
-import json, sqlite3, threading, time, webbrowser
+import json, sqlite3, threading, time, uuid, webbrowser
 from pypinyin import Style, lazy_pinyin
 from flask import Flask, jsonify, request, send_from_directory
 import commute, creds, db, sync, venues
-
-ORIGINS = ("home", "company")
 
 def create_app(conn, config, db_path=None):
     app = Flask(__name__, static_folder=None)
@@ -38,13 +36,14 @@ def create_app(conn, config, db_path=None):
             cm[(r["origin"], r["place_key"])] = {"drive_min": r["drive_min"],
                                                  "transit_min": r["transit_min"],
                                                  "walk_m": r["walk_m"]}
+        keys = [r["key"] for r in conn.execute("SELECT key FROM origins")]
         out = []
         for r in rows:
             g = dict(r)
             # 未归类：只有闪动场馆用自带坐标算过通勤；中羽联坐标不可信，通勤一律未知
             pk = commute.place_key(g["canonical_id"], g["venue_key"]) \
                 if g["canonical_id"] or g["source"] == "flashx" else None
-            g["commute"] = {o: cm.get((o, pk)) for o in ORIGINS}
+            g["commute"] = {o: cm.get((o, pk)) for o in keys}
             out.append(g)
         return jsonify({"games": out})
 
@@ -202,35 +201,62 @@ def create_app(conn, config, db_path=None):
 
     @app.get("/api/origins")
     def get_origins():
-        rows = {r["key"]: r for r in conn.execute("SELECT key,address,lat FROM origins")}
-        return jsonify({o: {"address": rows[o]["address"] if o in rows else "",
-                            "has_coord": o in rows and rows[o]["lat"] is not None}
-                        for o in ORIGINS})
+        return jsonify([{"key": r["key"], "name": r["name"], "address": r["address"] or "",
+                         "lat": r["lat"], "lng": r["lng"], "show": bool(r["show"])}
+                        for r in conn.execute("SELECT * FROM origins ORDER BY pos, rowid")])
+
+    def _origin_err(x):
+        # 单条出发地的校验错误；没问题返回 None
+        name, loc = x.get("name"), x.get("loc")
+        if not isinstance(name, str) or not name.strip():
+            return "名称不能为空"
+        if loc is None:
+            return None if x.get("key") else "先选位置"
+        if not (isinstance(loc, dict) and isinstance(loc.get("address"), str)
+                and _is_num(loc.get("lat")) and _is_num(loc.get("lng"))):
+            return "位置格式不对"
+        if not venues.in_shanghai(loc["lat"], loc["lng"]):
+            return "坐标不在上海范围内，检查一下是不是复制错了"
+        return None
 
     @app.post("/api/origins")
     def save_origins():
+        # 收完整列表：有 key 的更新、没 key 的新增、库里有但列表里没有的删除。
+        # 坐标由前端给（高德 POI 或换算好的手动坐标），这里只校验；单条失败不影响其他条
         body = request.get_json(silent=True)
-        if body is None:
-            body = {}
-        if not isinstance(body, dict):
-            return jsonify({"ok": False, "msg": "body 须为 JSON 对象"}), 400
-        old = {r["key"]: r["address"] for r in conn.execute("SELECT key,address FROM origins")}
-        res = {}
-        for o in ORIGINS:
-            addr = (body.get(o) or "").strip()
-            if not addr or addr == old.get(o):
-                res[o] = {"ok": True, "changed": False}  # 空或没变：不动
+        items = body.get("origins") if isinstance(body, dict) else None
+        if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
+            return jsonify({"ok": False, "msg": "body 须为 {origins: [...]}"}), 400
+        old = {r["key"] for r in conn.execute("SELECT key FROM origins")}
+        gone = old - {x.get("key") for x in items}
+        # 后台算通勤按开始时的坐标快照写回，期间删除/改位置会留下孤儿行或旧位置的通勤
+        if (gone or any(x.get("loc") is not None for x in items)) and compute_lock.locked():
+            return jsonify({"ok": False, "msg": "正在算通勤，等算完再删除或改位置"}), 409
+        for k in gone:
+            conn.execute("DELETE FROM origins WHERE key=?", (k,))
+            conn.execute("DELETE FROM commute WHERE origin=?", (k,))
+        pos = conn.execute("SELECT COALESCE(MAX(pos), -1) FROM origins").fetchone()[0]
+        res = []
+        for x in items:
+            key, loc = x.get("key"), x.get("loc")
+            err = "没有这个出发地" if key is not None and key not in old else _origin_err(x)
+            if err:
+                res.append({"ok": False, "msg": err, "key": key})
                 continue
-            ll = commute.geocode(addr)
-            if not ll:  # 查不到：不覆盖旧坐标
-                res[o] = {"ok": False, "msg": "地址查不到，填具体些"}
-                continue
-            conn.execute("INSERT OR REPLACE INTO origins(key,address,lat,lng) VALUES(?,?,?,?)",
-                         (o, addr, ll[0], ll[1]))
-            conn.execute("DELETE FROM commute WHERE origin=?", (o,))  # 坐标变了，缓存作废
-            conn.commit()
-            res[o] = {"ok": True, "changed": True}
-        return jsonify(res)  # 通勤由前端在地址改动后调 /api/commute 触发
+            name, show = x["name"].strip(), 1 if x.get("show", True) else 0
+            if key is None:  # 新增：key 不复用，免得筛选条件里旧上限套到新出发地上
+                key, pos = "o" + uuid.uuid4().hex[:8], pos + 1
+                conn.execute("INSERT INTO origins(key,name,address,lat,lng,show,pos) VALUES(?,?,?,?,?,?,?)",
+                             (key, name, loc["address"], loc["lat"], loc["lng"], show, pos))
+            else:
+                conn.execute("UPDATE origins SET name=?, show=? WHERE key=?", (name, show, key))
+                if loc is not None:
+                    conn.execute("UPDATE origins SET address=?, lat=?, lng=? WHERE key=?",
+                                 (loc["address"], loc["lat"], loc["lng"], key))
+                    conn.execute("DELETE FROM commute WHERE origin=?", (key,))  # 坐标变了，缓存作废
+            res.append({"ok": True, "changed": loc is not None, "key": key})
+        conn.commit()
+        return jsonify(res)  # 通勤由前端在位置改动后调 /api/commute 触发
 
     def _start_compute():
         # 后台算通勤，不阻塞请求。单飞：同时只跑一个线程；

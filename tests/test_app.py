@@ -2,6 +2,7 @@ import db, commute, app as appmod
 
 def _app():
     conn = db.connect(":memory:"); db.init_schema(conn)
+    conn.execute("INSERT INTO origins(key,name,lat,lng,pos) VALUES('home','家',31.0,121.0,0),('company','公司',31.1,121.1,1)")
     conn.execute("INSERT INTO games(source,source_id,title,date,venue_key,platform_name_norm)"
                  " VALUES('flashx','1','t','2999-01-01','flashx:1','某馆')")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min)"
@@ -24,6 +25,7 @@ def test_games_endpoint_joins_alias_for_amap_name_and_commute():
     conn.execute("INSERT INTO games(source,source_id,date,venue_key,platform_name_norm) VALUES('zhongyulian','1','2999-01-01','zhongyulian:9','万体汇')")
     conn.execute("INSERT INTO venue_aliases(platform_name_norm,canonical_id,origin,updated_at) VALUES('万体汇',4,'manual',NULL)")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','c:4',12,30,800)")
+    conn.execute("INSERT INTO origins(key,name) VALUES('home','家')")
     conn.commit()
     g = appmod.create_app(conn, {}).test_client().get("/api/games").get_json()["games"][0]
     assert g["amap_name"] == "徐家汇体育公园" and g["canonical_id"] == 4
@@ -127,58 +129,92 @@ def test_pinyin():
     r = appmod.create_app(conn, {}).test_client().post("/api/pinyin", json={"texts": ["万体汇A馆"]}).get_json()
     assert r == {"万体汇A馆": ["wantihuiaguan", "wthag"]}
 
-def test_save_origins_geocodes_and_clears_commute(monkeypatch):
+def _origins_app():
+    # 两个已有出发地 + 各自一条通勤缓存
     conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
-    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min) VALUES('home','v:x',20,30)")
-    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min) VALUES('company','v:x',10,15)")
+    conn.execute("INSERT INTO origins(key,name,address,lat,lng,show,pos) VALUES"
+                 "('home','家','旧址',31.0,121.0,1,0),('company','公司','司',31.1,121.1,1,1)")
+    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min) VALUES('home','v:x',20,30),('company','v:x',10,15)")
     conn.commit()
-    monkeypatch.setattr(commute, "geocode", lambda a: (31.2, 121.5))
-    client = appmod.create_app(conn, {}).test_client()
-    r = client.post("/api/origins", json={"home": "新址", "company": ""}).get_json()
+    return conn, appmod.create_app(conn, {}).test_client()
+
+def _cnt(conn, origin):
+    return conn.execute("SELECT COUNT(*) c FROM commute WHERE origin=?", (origin,)).fetchone()["c"]
+
+HOME = {"key": "home", "name": "家", "show": True}
+COMPANY = {"key": "company", "name": "公司", "show": True}
+LOC = {"address": "宜山路700号（徐汇区 宜山路700号）", "lat": 31.17, "lng": 121.42}
+
+def test_get_origins_list_ordered():
+    conn, c = _origins_app()
+    assert c.get("/api/origins").get_json() == [
+        {"key": "home", "name": "家", "address": "旧址", "lat": 31.0, "lng": 121.0, "show": True},
+        {"key": "company", "name": "公司", "address": "司", "lat": 31.1, "lng": 121.1, "show": True}]
+
+def test_add_origin_gets_new_key_and_pos():
+    conn, c = _origins_app()
+    r = c.post("/api/origins", json={"origins": [HOME, COMPANY, {"name": "父母家", "show": False, "loc": LOC}]}).get_json()
+    assert [x["ok"] for x in r] == [True, True, True]
+    assert r[2]["changed"] is True and r[2]["key"].startswith("o") and len(r[2]["key"]) == 9
+    row = conn.execute("SELECT * FROM origins WHERE key=?", (r[2]["key"],)).fetchone()
+    assert (row["name"], row["address"], row["lat"], row["lng"], row["show"], row["pos"]) == ("父母家", LOC["address"], 31.17, 121.42, 0, 2)
+    assert r[0]["changed"] is False and _cnt(conn, "home") == 1  # 没带 loc 的不动
+
+def test_rename_and_hide_keep_commute():
+    conn, c = _origins_app()
+    c.post("/api/origins", json={"origins": [{"key": "home", "name": "老家", "show": False}, COMPANY]})
+    row = conn.execute("SELECT name,show,lat FROM origins WHERE key='home'").fetchone()
+    assert (row["name"], row["show"], row["lat"]) == ("老家", 0, 31.0)
+    assert _cnt(conn, "home") == 1
+
+def test_move_origin_clears_only_its_commute():
+    conn, c = _origins_app()
+    r = c.post("/api/origins", json={"origins": [{**HOME, "loc": LOC}, COMPANY]}).get_json()
+    assert r[0] == {"ok": True, "changed": True, "key": "home"}
     row = conn.execute("SELECT address,lat,lng FROM origins WHERE key='home'").fetchone()
-    assert row["address"] == "新址" and row["lat"] == 31.2
-    assert r["home"]["ok"] is True
-    # 地址变了 → 该出发地的 commute 被清
-    assert conn.execute("SELECT COUNT(*) c FROM commute WHERE origin='home'").fetchone()["c"] == 0
-    # 只清该出发地：company 缓存仍在
-    assert conn.execute("SELECT COUNT(*) c FROM commute WHERE origin='company'").fetchone()["c"] == 1
+    assert (row["address"], row["lat"], row["lng"]) == (LOC["address"], 31.17, 121.42)
+    assert _cnt(conn, "home") == 0 and _cnt(conn, "company") == 1
 
-def test_save_origins_geocode_fail_keeps_old(monkeypatch):
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
-    conn.commit()
-    monkeypatch.setattr(commute, "geocode", lambda a: None)
-    client = appmod.create_app(conn, {}).test_client()
-    r = client.post("/api/origins", json={"home": "乱填查不到", "company": ""}).get_json()
-    assert conn.execute("SELECT lat FROM origins WHERE key='home'").fetchone()["lat"] == 31.0  # 不覆盖
-    assert r["home"]["ok"] is False
+def test_delete_origin_removes_row_and_commute():
+    conn, c = _origins_app()
+    c.post("/api/origins", json={"origins": [HOME]})
+    assert conn.execute("SELECT COUNT(*) c FROM origins WHERE key='company'").fetchone()["c"] == 0
+    assert _cnt(conn, "company") == 0 and _cnt(conn, "home") == 1
 
-def test_get_origins_and_config():
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','家',31.0,121.0)")
-    conn.commit()
-    c = appmod.create_app(conn, {}).test_client()
-    o = c.get("/api/origins").get_json()
-    assert o["home"] == {"address": "家", "has_coord": True}
-    assert o["company"] == {"address": "", "has_coord": False}
-    cfg = c.get("/api/config").get_json()
-    assert "canonical_names" not in cfg
+def test_save_origins_item_errors_dont_block_others():
+    conn, c = _origins_app()
+    r = c.post("/api/origins", json={"origins": [
+        {"key": "home", "name": "  ", "show": True},                                   # 名称空
+        COMPANY,
+        {"name": "外地", "show": True, "loc": {"address": "x", "lat": 39.9, "lng": 116.4}},  # 不在上海
+        {"name": "没位置", "show": True},                                              # 新增缺 loc
+        {"key": "nope", "name": "幽灵", "show": True}]}).get_json()                    # 不存在的 key
+    assert [x["ok"] for x in r] == [False, True, False, False, False]
+    assert r[0]["msg"] == "名称不能为空"
+    assert r[2]["msg"] == "坐标不在上海范围内，检查一下是不是复制错了"
+    assert r[3]["msg"] == "先选位置"
+    assert conn.execute("SELECT name FROM origins WHERE key='home'").fetchone()["name"] == "家"  # 失败不改
+    assert conn.execute("SELECT COUNT(*) c FROM origins").fetchone()["c"] == 2                 # 失败的新增不入库
 
-def test_save_origins_unchanged_keeps_commute(monkeypatch):
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,address,lat,lng) VALUES('home','旧址',31.0,121.0)")
-    conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min) VALUES('home','v:x',20,30)")
-    conn.commit()
-    monkeypatch.setattr(commute, "geocode", lambda a: (_ for _ in ()).throw(AssertionError("不该调")))
-    c = appmod.create_app(conn, {}).test_client()
-    c.post("/api/origins", json={"home": "旧址", "company": ""})
-    assert conn.execute("SELECT COUNT(*) c FROM commute WHERE origin='home'").fetchone()["c"] == 1
-
-def test_save_origins_non_dict_body():
-    conn = db.connect(":memory:"); db.init_schema(conn)
-    c = appmod.create_app(conn, {}).test_client()
+def test_save_origins_bad_body():
+    conn, c = _origins_app()
     assert c.post("/api/origins", json=["x"]).status_code == 400
+    assert c.post("/api/origins", json={"origins": ["x"]}).status_code == 400
+
+def test_save_origins_409_while_computing(monkeypatch, tmp_path):
+    import threading, time, sync
+    conn, _ = _origins_app()
+    gate = threading.Event()
+    monkeypatch.setattr(sync, "compute_pending", lambda p, cfg, **k: gate.wait(2))
+    c = appmod.create_app(conn, {}, db_path=str(tmp_path / "x.db")).test_client()
+    c.post("/api/commute")
+    time.sleep(0.05)
+    assert c.post("/api/origins", json={"origins": [HOME]}).status_code == 409                  # 删除
+    assert c.post("/api/origins", json={"origins": [{**HOME, "loc": LOC}, COMPANY]}).status_code == 409  # 改位置
+    assert conn.execute("SELECT COUNT(*) c FROM origins").fetchone()["c"] == 2
+    r = c.post("/api/origins", json={"origins": [{**HOME, "name": "老家"}, COMPANY]})            # 只改名不受限
+    assert r.status_code == 200 and r.get_json()[0]["ok"] is True
+    gate.set()
 
 def test_capture_reports_returned_platforms(monkeypatch):
     import creds
@@ -203,6 +239,7 @@ def _venue_app(monkeypatch=None):
         dict(g, source="zhongyulian", source_id="3", venue_name="野馆", venue_key="zhongyulian:3", lat=None, lng=None)])
     conn.execute("UPDATE venue_aliases SET origin='auto', canonical_id=1 WHERE platform_name_norm='堂颂羽毛球馆(淞南店)'")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','c:2',10,20,500)")
+    conn.execute("INSERT INTO origins(key,name) VALUES('home','家')")
     conn.commit()
     return conn, appmod.create_app(conn, {}).test_client()
 
@@ -348,6 +385,7 @@ def test_games_zyl_unclassified_has_no_commute_even_with_stale_cache():
     conn.execute("INSERT INTO games(source,source_id,date,venue_key,platform_name_norm) VALUES('zhongyulian','1','2999-01-01','zhongyulian:9','野馆')")
     conn.execute("INSERT INTO venue_aliases(platform_name_norm,canonical_id,origin,updated_at) VALUES('野馆',NULL,'none',NULL)")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min,walk_m) VALUES('home','v:zhongyulian:9',15,30,900)")
+    conn.execute("INSERT INTO origins(key,name,pos) VALUES('home','家',0),('company','公司',1)")
     conn.commit()
     g = appmod.create_app(conn, {}).test_client().get("/api/games").get_json()["games"][0]
     assert g["commute"] == {"home": None, "company": None}

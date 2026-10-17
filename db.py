@@ -35,7 +35,9 @@ def init_schema(conn):
       origin TEXT, place_key TEXT, drive_min INTEGER, transit_min INTEGER,
       walk_m INTEGER, computed_at TEXT, PRIMARY KEY(origin, place_key));
     CREATE TABLE IF NOT EXISTS origins(
-      key TEXT PRIMARY KEY, address TEXT, lat REAL, lng REAL);
+      key TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', address TEXT, lat REAL, lng REAL,
+      show INTEGER NOT NULL DEFAULT 1,   -- 1 = 在主页表格里显示成列
+      pos INTEGER NOT NULL DEFAULT 0);   -- 排列顺序
     CREATE TABLE IF NOT EXISTS kw_history(word TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS filters(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT);
     """)

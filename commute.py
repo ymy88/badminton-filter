@@ -45,16 +45,6 @@ def _amap_get(url, params):
         time.sleep(1)
     return None
 
-def geocode(address):
-    d = _amap_get(f"{BASE}/v3/geocode/geo", {"address": address, "city": CITY})
-    if not d or not d.get("geocodes"):
-        return None
-    try:
-        lng, lat = d["geocodes"][0]["location"].split(",")
-        return float(lat), float(lng)
-    except (ValueError, KeyError, IndexError, AttributeError, TypeError):
-        return None
-
 def poi_search(name, limit=1, near=None, radius=1000):
     # 按名字搜高德 POI，返回前 limit 条：名称 + POI id（跨平台去重键）+ 坐标 + 所在区 + 地址；
     # near=(lat, lng) 时改为周边搜索：只在该点 radius 米内找（比全市搜索匹配更严，搜不到的多）。
