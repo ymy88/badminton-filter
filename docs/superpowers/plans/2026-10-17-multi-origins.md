@@ -67,6 +67,12 @@ def _app():
     conn.execute("INSERT INTO origins(key,name) VALUES('home','家')")
 ```
 
+`_venue_app()`（`test_assign_existing_canonical_sets_manual` 要从 `/api/games` 取 `commute["home"]`）在 `INSERT INTO commute … 'c:2'` 那行后面加：
+
+```python
+    conn.execute("INSERT INTO origins(key,name) VALUES('home','家')")
+```
+
 `test_games_zyl_unclassified_has_no_commute_even_with_stale_cache` 在 `conn.commit()` 前加：
 
 ```python
