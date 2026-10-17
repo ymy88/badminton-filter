@@ -14,8 +14,10 @@
   header .sep { flex: 1; }
   #banner { padding: 8px 16px; background: var(--c-warn-bg); display: none; }
   #addr { display: none; padding: 10px 16px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-line); }
-  #addr div { margin: 4px 0; }
-  #addr input { width: 360px; }
+  .orow { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+  .orow .oname { width: 140px; }
+  .opick { margin: 4px 0 10px; }
+  .opick:empty { display: none; }
   main { padding: 16px; }
   aside { padding: 4px 14px; margin-bottom: 16px; }
   .grp { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; padding: 10px 0; }
@@ -59,11 +61,11 @@
   <button id="commuteBtn">算通勤</button>
   <button id="capBtn" class="danger" style="display:none">抓取凭证</button>
 </header>
-<div id="banner">请先在『设置地址』填家和公司地址</div>
+<div id="banner">请先在『设置地址』填出发地地址</div>
 <div id="addr">
-  <div>家地址 <input id="addrHome" type="text"> <span id="msgHome"></span></div>
-  <div>公司地址 <input id="addrCompany" type="text"> <span id="msgCompany"></span></div>
-  <div><button id="addrSave">保存</button></div>
+  <div id="addrRows"></div>
+  <div class="orow"><button id="addrAdd">+ 添加地址</button><span class="muted" id="addrCost"></span>
+    <button id="addrSave" class="primary">保存</button><span id="addrMsg"></span></div>
 </div>
 <main>
   <aside id="form" class="card">
@@ -84,8 +86,7 @@
         <option value="">不限</option><option value="zhongyulian">中羽联</option><option value="flashx">闪动</option></select></div>
     </div>
     <div class="grp">
-      <div class="f"><span>家通勤上限（分钟，按当前方式）</span><input type="number" id="homeCommuteMax" min="0"></div>
-      <div class="f"><span>公司通勤上限（分钟）</span><input type="number" id="companyCommuteMax" min="0"></div>
+      <div id="cmaxBox" style="display: contents"></div>
       <div class="f"><label><input type="checkbox" id="unkCommute">含通勤未知</label></div>
     </div>
     <div class="grp">
@@ -107,7 +108,7 @@
     <table>
       <thead><tr>
         <th class="s" data-sort="start_time">时间</th><th class="s" data-sort="duration">时长</th><th class="s" data-sort="venue">场馆 <span class="helpwrap"><span class="help" id="venueHelp">?</span><span class="pop" id="venuePop">上一行：平台读取到的名字<br>下一行：高德地图搜到的名字</span></span></th><th class="s" data-sort="club">俱乐部</th>
-        <th class="s" data-sort="commute_home">家通勤</th><th class="s" data-sort="commute_company">公司通勤</th><th class="s" data-sort="price">价格</th>
+        <th class="s" data-sort="price">价格</th>
         <th class="s" data-sort="applied">报名</th><th class="s" data-sort="source">来源</th><th class="s" data-sort="tags">标签</th>
       </tr></thead>
       <tbody id="tbody"></tbody>
@@ -117,7 +118,7 @@
 
 <script type="module">
 import { applyFilters, sortGames, pyMatch, parseTags } from "/static/filters.js";
-import { $, SRC, esc, api, PY, ensurePinyin } from "/static/common.js";
+import { $, SRC, esc, api, PY, ensurePinyin, mapLink, locPicker } from "/static/common.js";
 
 window._games = [];
 const radio = (name) => document.querySelector(`input[name=${name}]:checked`).value;
@@ -168,23 +169,29 @@ function makeChips(boxId, getOptions, { allowNew = false, onChange = () => {} } 
   document.addEventListener("click", (e) => { if (!box.contains(e.target)) dd.style.display = "none"; });
   return { values: () => vals.slice(), set: (arr) => { vals.length = 0; (arr || []).forEach((v) => { if (v && !vals.includes(v)) vals.push(v); }); renderChips(); } };
 }
+let origins = [];          // 出发地列表（GET /api/origins）
+const shownOrigins = () => origins.filter((o) => o.show);
+// 通勤上限框：data-cmax = 出发地 key
+const cmaxInputs = () => [...document.querySelectorAll("[data-cmax]")];
 const chips = {};          // 胶囊控件：id → 控件（id 同时是存库的字段名）
 const kwSeen = new Set();  // 用过的关键字（下拉候选）
 
 // 筛选条件整份存库，页面加载时恢复
-const FIELDS = ["date", "timeBucket", "dur", "priceMax", "source", "homeCommuteMax", "companyCommuteMax", "unkCommute",
+const FIELDS = ["date", "timeBucket", "dur", "priceMax", "source", "unkCommute",
   "apMin", "apMax", "toMin", "toMax", "onlyOpen"];
 let sortBy = "start_time", sortDesc = false;  // 当前排序列与方向（点表头切换，随筛选条件存库）
 function formState() {
   const f = { mode: radio("mode"), sortBy, sortDesc };
   FIELDS.forEach((id) => { const el = $(id); f[id] = el.type === "checkbox" ? el.checked : el.value; });
+  f.commuteMax = Object.fromEntries(cmaxInputs().map((el) => [el.dataset.cmax, el.value]));
   for (const [id, c] of Object.entries(chips)) f[id] = c.values();
   return f;
 }
 function applyFormState(f) {
   if (!f) return;
   FIELDS.forEach((id) => { if (id in f) { const el = $(id); if (el.type === "checkbox") el.checked = !!f[id]; else el.value = f[id]; } });
-  if (document.querySelector(`th.s[data-sort="${f.sortBy}"]`)) { sortBy = f.sortBy; sortDesc = !!f.sortDesc; }  // 存的列已不存在则保持默认
+  cmaxInputs().forEach((el) => { el.value = f.commuteMax?.[el.dataset.cmax] ?? ""; });
+  if (document.querySelector(`th.s[data-sort="${CSS.escape(f.sortBy || "")}"]`)) { sortBy = f.sortBy; sortDesc = !!f.sortDesc; }  // 存的列已不存在则保持默认
   const m = document.querySelector(`input[name=mode][value="${f.mode}"]`);
   if (m) m.checked = true;
   for (const [id, c] of Object.entries(chips)) c.set(f[id]);
@@ -208,7 +215,7 @@ function buildCriteria() {
     startMin: tMin, startMax: tMax,
     durRange: durRange,
     mode: radio("mode"),
-    homeCommuteMax: num("homeCommuteMax"), companyCommuteMax: num("companyCommuteMax"),
+    commuteMax: Object.fromEntries(cmaxInputs().filter((el) => el.value !== "").map((el) => [el.dataset.cmax, Number(el.value)])),
     includeUnknownCommute: $("unkCommute").checked,
     venueInclude: chips.venueInc.values(), venueExclude: chips.venueExc.values(),
     clubInclude: chips.clubInc.values(), clubExclude: chips.clubExc.values(),
@@ -234,11 +241,11 @@ function rowHtml(g) {
   const tags = parseTags(g.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
   return `<tr class="row"><td class="nowrap">${esc(g.date)}<br>${esc(g.start_time)}~${esc(g.end_time)}</td>
     <td class="nowrap">${fmtDur(g.duration_min)}</td><td>${venue}</td><td>${esc(g.club_name || "—")}</td>
-    <td class="nowrap">${fmtCommute(g.commute?.home)}</td><td class="nowrap">${fmtCommute(g.commute?.company)}</td><td>${g.price == null ? "—" : esc(g.price)}</td>
+    ${shownOrigins().map((o) => `<td class="nowrap">${fmtCommute(g.commute?.[o.key])}</td>`).join("")}<td>${g.price == null ? "—" : esc(g.price)}</td>
     <td>${esc(g.applied_num)}/${esc(g.total_num)}</td>
     <td><span class="src ${esc(g.source)}">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
-    <tr class="detail" style="display:none"><td colspan="10">${esc(g.raw_text || "（无原文）")}
-组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
+    <tr class="detail" style="display:none"><td colspan="${8 + shownOrigins().length}">${esc(g.raw_text || "（无原文）")}
+${origins.length ? "通勤：" + origins.map((o) => `${esc(o.name)} ${fmtCommute(g.commute?.[o.key])}`).join("　") + "\n" : ""}组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
 回${esc(SRC[g.source] || g.source)}小程序按【${esc(g.date)} ${esc(g.start_time || "")}·${esc(g.venue_name || "")}】找这条报名；活动id ${esc(g.detail_ref || g.source_id || "—")}（仅供核对，不能直接搜）</td></tr>`;
 }
 
@@ -259,10 +266,21 @@ async function loadGames() {
   ensurePinyin([...venueOptions(), ...clubOptions(), ...kwOptions()]);
 }
 
-function applyOrigins(o) {
-  $("addrHome").value = o.home?.address || "";
-  $("addrCompany").value = o.company?.address || "";
-  $("banner").style.display = !o.home?.has_coord && !o.company?.has_coord ? "block" : "none";
+// 按出发地列表重建：筛选里的上限框（全部出发地）+ 表头通勤列（只「显示成列」的），保留已填的上限
+function applyOrigins(list) {
+  origins = list;
+  const cur = Object.fromEntries(cmaxInputs().map((el) => [el.dataset.cmax, el.value]));
+  $("cmaxBox").innerHTML = origins.map((o) =>
+    `<div class="f"><span>${esc(o.name)}通勤上限（分钟，按当前方式）</span><input type="number" min="0" data-cmax="${esc(o.key)}"></div>`).join("");
+  cmaxInputs().forEach((el) => {
+    el.value = cur[el.dataset.cmax] ?? "";
+    el.addEventListener("input", onFormChange);
+  });
+  document.querySelectorAll("th.oc").forEach((th) => th.remove());
+  document.querySelector('th[data-sort="club"]').insertAdjacentHTML("afterend", shownOrigins().map((o) =>
+    `<th class="s oc" data-sort="commute:${esc(o.key)}">${esc(o.name)}通勤</th>`).join(""));
+  if (!document.querySelector(`th.s[data-sort="${CSS.escape(sortBy)}"]`)) { sortBy = "start_time"; sortDesc = false; }  // 排序列被删/隐藏
+  $("banner").style.display = origins.some((o) => o.lat != null) ? "none" : "block";
 }
 
 // 场馆下拉候选：库里出现过的馆名 + 统一名；关键字下拉候选：用过的词 + 球局标签
@@ -277,8 +295,8 @@ async function init() {
   const kwChanged = () => { [...chips.kwInc.values(), ...chips.kwExc.values()].forEach((v) => kwSeen.add(v)); onFormChange(); };
   for (const id of ["kwInc", "kwExc"]) chips[id] = makeChips(id, kwOptions, { allowNew: true, onChange: kwChanged });
   (cfg.kw_history || []).forEach((v) => kwSeen.add(v));  // 打过的词永久进下拉候选
+  applyOrigins(org);  // 先建上限框和表头，才能恢复上限值和排序列
   applyFormState(cfg.filters);
-  applyOrigins(org);
   await loadGames();
   // 刷新网页时若后台拉取/通勤还在跑，恢复进度显示并禁用对应按钮
   try {
@@ -293,12 +311,14 @@ document.querySelectorAll("#form input, #form select, header input").forEach((el
   el.addEventListener("input", onFormChange);
   el.addEventListener("change", onFormChange);
 });
-document.querySelectorAll("th.s").forEach((th) => th.addEventListener("click", () => {
+$("tbody").closest("table").querySelector("thead").addEventListener("click", (e) => {  // 委托：出发地列是动态插入的
+  const th = e.target.closest("th.s");
+  if (!th) return;
   // 点当前列切换升/降序；点别的列从升序开始
   sortDesc = th.dataset.sort === sortBy ? !sortDesc : false;
   sortBy = th.dataset.sort;
   onFormChange();
-}));
+});
 // 场馆列说明：点「?」图标弹/收说明，点别处收起
 $("venueHelp").onclick = (e) => { e.stopPropagation(); $("venuePop").classList.toggle("show"); };
 document.addEventListener("click", (e) => { if (!e.target.closest(".helpwrap")) $("venuePop").classList.remove("show"); });
@@ -306,21 +326,84 @@ $("tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr.row");
   if (tr) { const d = tr.nextElementSibling; d.style.display = d.style.display === "none" ? "" : "none"; }
 });
-$("addrBtn").onclick = () => { const a = $("addr"); a.style.display = a.style.display === "block" ? "none" : "block"; };
 
+// ---- 出发地面板：编辑草稿 draft，点「保存」整份提交 ----
+let draft = [];  // [{key?, name, address, lat, lng, show, loc?, msg?, cls?}]；loc = 改过但未保存的位置
+let picking = -1;  // 正在选位置的行（同一时间只开一个选点区）
+function renderAddr() {
+  $("addrRows").innerHTML = draft.map((d, i) => `<div class="orow" data-i="${i}">
+      <input class="oname" type="text" value="${esc(d.name)}" placeholder="名称，如 父母家">
+      <span>${d.lat == null ? '<span class="muted">未定位</span>' : esc(d.address) + mapLink(d.name || "出发地", d.lat, d.lng)}${d.loc ? ' <span class="muted">（未保存）</span>' : ""}</span>
+      <button data-act="loc">改位置</button>
+      <label><input class="oshow" type="checkbox"${d.show ? " checked" : ""}>显示成列</label>
+      <button data-act="del" class="danger">删除</button>
+      <span class="${d.cls || ""}">${esc(d.msg || "")}</span></div>
+    <div class="opick"></div>`).join("");
+  if (picking >= 0) openPicker(picking);
+}
+function openPicker(i) {
+  picking = i;
+  document.querySelectorAll(".opick").forEach((el) => { el.innerHTML = ""; });
+  const { input } = locPicker(document.querySelectorAll(".opick")[i], {
+    query: draft[i].name,
+    onPick: (p) => {
+      const address = p.amap_id ? `${p.name}（${p.district} ${p.address}）` : `手动坐标 ${p.lng},${p.lat}`;
+      Object.assign(draft[i], { loc: { address, lat: p.lat, lng: p.lng }, address, lat: p.lat, lng: p.lng, msg: "" });
+      picking = -1;
+      renderAddr();
+    },
+  });
+  input.focus();
+}
+$("addrRows").addEventListener("input", (e) => {  // 名称、显示成列：只改草稿，不重绘（免得丢焦点）
+  const d = draft[Number(e.target.closest(".orow")?.dataset.i)];
+  if (!d) return;
+  if (e.target.classList.contains("oname")) d.name = e.target.value;
+  if (e.target.classList.contains("oshow")) d.show = e.target.checked;
+});
+$("addrRows").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const i = Number(btn.closest(".orow").dataset.i);
+  if (btn.dataset.act === "loc") openPicker(i);
+  else if (btn.dataset.act === "del") {
+    if (draft[i].key && !confirm(`删除「${draft[i].name}」会一起删掉它的通勤缓存，确定？`)) return;
+    draft.splice(i, 1);
+    picking = -1;
+    renderAddr();
+  }
+});
+$("addrAdd").onclick = async () => {
+  draft.push({ name: "", address: "", lat: null, lng: null, show: true });
+  picking = draft.length - 1;
+  renderAddr();
+  try { $("addrCost").textContent = `新地址第一次算通勤约 ${(await api("/api/commute/status")).commute_places * 3} 次高德调用`; }
+  catch (e) { /* 只是提示，查不到不影响 */ }
+};
+$("addrBtn").onclick = () => {
+  const a = $("addr");
+  if (a.style.display === "block") { a.style.display = "none"; return; }
+  draft = origins.map((o) => ({ ...o }));
+  picking = -1;
+  $("addrMsg").textContent = "";
+  renderAddr();
+  a.style.display = "block";
+};
 $("addrSave").onclick = async () => {
+  const noLoc = draft.find((d) => !d.key && !d.loc);
+  if (noLoc) { $("addrMsg").className = "err"; $("addrMsg").textContent = `先给「${noLoc.name || "新地址"}」选位置`; return; }
+  let res;
   try {
-    const r = await api("/api/origins", { home: $("addrHome").value, company: $("addrCompany").value });
-    let changed = false;
-    for (const [k, id] of [["home", "msgHome"], ["company", "msgCompany"]]) {
-      const x = r[k] || {};
-      $(id).className = x.ok ? "ok" : "err";
-      $(id).textContent = x.ok ? "已保存" : (x.msg || "保存失败");
-      if (x.ok && x.changed) changed = true;
-    }
-    applyOrigins(await api("/api/origins"));
-    if (changed) { await loadGames(); startCompute("地址已更新"); }  // 地址变→重算通勤
-  } catch (e) { $("msgHome").className = "err"; $("msgHome").textContent = "保存失败：" + e; }
+    res = await api("/api/origins", { origins: draft.map((d) => ({ key: d.key, name: d.name, show: d.show, ...(d.loc ? { loc: d.loc } : {}) })) });
+  } catch (e) { $("addrMsg").className = "err"; $("addrMsg").textContent = "保存失败：" + e.message; return; }
+  // 成功的条目记下 key、清掉未保存标记；失败的保留输入，提示原因
+  res.forEach((r, i) => Object.assign(draft[i], r.ok ? { key: r.key, loc: undefined, msg: "已保存", cls: "ok" } : { msg: r.msg, cls: "err" }));
+  $("addrMsg").textContent = "";
+  picking = -1;
+  renderAddr();
+  applyOrigins(await api("/api/origins"));
+  onFormChange();  // 删掉的出发地的上限从存库的筛选条件里去掉
+  if (res.some((r) => r.ok && r.changed)) { await loadGames(); startCompute("地址已更新"); }  // 位置变→重算通勤
 };
 
 let _pollTimer = null;
