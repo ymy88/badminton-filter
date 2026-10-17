@@ -92,3 +92,20 @@ button.danger { color: var(--c-danger); }
   & div { padding: 4px 8px; cursor: pointer; font-size: 13px; }
   & div:hover { background: var(--c-hover); }
 }
+
+/* ---- 5. 共用控件：选点区（locPicker） ---- */
+.lp {
+  display: flex; flex-direction: column; gap: 8px; max-width: 760px;
+  & .row { display: flex; gap: 8px; align-items: center; }
+  & .row input { flex: 1; }
+}
+.pick {
+  border: 1px solid var(--c-line); border-radius: var(--radius); background: var(--c-surface);
+  &:empty { display: none; }
+  & div { padding: 5px 8px; cursor: pointer; border-bottom: 1px solid var(--c-line); }
+  & div:last-child { border-bottom: none; }
+  & div:hover { background: var(--c-hover); }
+  & small { color: var(--c-muted); margin-left: 6px; }
+  & .head { cursor: default; color: var(--c-muted); font-size: var(--fs-sm); background: var(--c-surface-2); }
+  & .head:hover { background: var(--c-surface-2); }
+}

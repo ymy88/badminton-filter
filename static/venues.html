@@ -32,14 +32,6 @@
   .ed { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
   .ed .row { display: flex; gap: 8px; align-items: center; }
   .ed input { flex: 1; }
-  .pick { border: 1px solid var(--c-line); border-radius: var(--radius); background: var(--c-surface); }
-  .pick:empty { display: none; }
-  .pick div { padding: 5px 8px; cursor: pointer; border-bottom: 1px solid var(--c-line); }
-  .pick div:last-child { border-bottom: none; }
-  .pick div:hover { background: var(--c-hover); }
-  .pick small { color: var(--c-muted); margin-left: 6px; }
-  .pick .head { cursor: default; color: var(--c-muted); font-size: var(--fs-sm); background: var(--c-surface-2); }
-  .pick .head:hover { background: var(--c-surface-2); }
 </style>
 </head>
 <body>
@@ -64,8 +56,8 @@
 </main>
 
 <script type="module">
-import { pyMatch, rankCandidates, parseCoord } from "/static/filters.js";
-import { $, SRC, esc, api, PY, ensurePinyin } from "/static/common.js";
+import { pyMatch, rankCandidates } from "/static/filters.js";
+import { $, SRC, esc, api, PY, ensurePinyin, mapLink, locPicker } from "/static/common.js";
 
 let rows = [], canonicals = [];
 let editing = null;  // 正在编辑的 platform_name_norm（同一时间只开一个编辑区）
@@ -73,8 +65,6 @@ let editing = null;  // 正在编辑的 platform_name_norm（同一时间只开�
 // 这些行在「待处理」里不消失，带「撤销」按钮；刷新页面后清空
 const undo = new Map();
 
-const mapLink = (name, lat, lng) => lat == null ? "" :
-  ` <a href="https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}" target="_blank" rel="noopener">地图</a>`;
 // updated_at 是 SQLite datetime('now')（UTC）→ 本地时间
 const localTime = (t) => new Date(t.replace(" ", "T") + "Z").toLocaleString("zh-CN", { hour12: false });
 // 待处理：还有球局的未归类（球局已过期的不再归类，不催）+ 可疑的自动归类
@@ -149,67 +139,35 @@ async function load() {
   ensurePinyin([...rows.map((v) => v.name), ...canonicals.map((c) => c.amap_name)]);
 }
 
-// ---- 编辑区：先选已有统一球场；没有合适的再搜高德 ----
+// ---- 编辑区：先选已有统一球场；没有合适的再搜高德或手动指定坐标 ----
 function openEditor(tr) {
   document.querySelectorAll("tr.edit").forEach((e) => e.remove());
   const v = rows.find((x) => x.platform_name_norm === tr.dataset.norm);
-  editing = v.platform_name_norm;
+  const norm = editing = v.platform_name_norm;
   const ed = document.createElement("tr");
   ed.className = "edit";
-  ed.innerHTML = `<td colspan="6"><div class="ed">
-    <div class="row"><input type="text" value="${esc(v.name)}"><button data-act="amap">在高德搜索</button><button data-act="close">取消</button></div>
-    <div class="pick canon"></div><div class="pick amap"></div>
-    <div class="row"><span class="nowrap">高德搜不到？手动指定坐标：</span>
-      <input class="cname" type="text" value="${esc(v.name)}" placeholder="名称">
-      <input class="cll" type="text" placeholder="高德坐标 或 百度地图链接">
-      <button data-act="coord">保存坐标</button></div>
-    <div class="muted">在 <a href="https://map.baidu.com/" target="_blank" rel="noopener">百度地图</a> 点开场馆（别拖动地图），把地址栏链接整条粘进来；
-      或从 <a href="https://lbs.amap.com/tools/picker" target="_blank" rel="noopener">高德坐标拾取器</a> 复制坐标（要登录认证才有完整小数）<span class="cprev"></span></div></div></td>`;
+  ed.innerHTML = `<td colspan="6"><div class="ed"><div class="lpbox"></div>
+    <div class="row"><span class="nowrap">手动坐标的名称：</span><input class="cname" type="text" value="${esc(v.name)}">
+      <button data-act="close">取消</button></div></div></td>`;
   tr.after(ed);
-  const input = ed.querySelector("input");
-  const showCanon = () => {
-    const q = input.value.trim();
+  const showCanon = (q) => {
     const byName = new Map(canonicals.map((c) => [c.amap_name, c]));
     const hits = q ? rankCandidates(q, [...byName.keys()], PY).map((n) => byName.get(n)) : [];
-    ed.querySelector(".canon").innerHTML = hits.length ? `<div class="head">已有统一球场（按名字相近程度）</div>` +
-      hits.map((c) => `<div data-cid="${c.id}">${esc(c.amap_name)}${mapLink(c.amap_name, c.lat, c.lng)}</div>`).join("") : "";
+    slot.innerHTML = hits.length ? `<div class="pick canon"><div class="head">已有统一球场（按名字相近程度）</div>` +
+      hits.map((c) => `<div data-cid="${c.id}">${esc(c.amap_name)}${mapLink(c.amap_name, c.lat, c.lng)}</div>`).join("") + "</div>" : "";
   };
-  input.addEventListener("input", showCanon);
-  // 手动坐标：边输入边预览换算后的高德坐标，保存前可点地图链接核对位置
-  const coordPreview = () => {
-    const text = ed.querySelector(".cll").value;
-    const ll = parseCoord(text), err = coordError(text, ll);
-    ed.querySelector(".cprev").innerHTML = !text.trim() ? ""
-      : err ? ` → <span class="err">${err}</span>`
-      : ` → 高德坐标 ${ll.lng},${ll.lat}${mapLink(ed.querySelector(".cname").value || "场馆", ll.lat, ll.lng)}`;
-  };
-  ed.querySelectorAll(".cll, .cname").forEach((el) => el.addEventListener("input", coordPreview));
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") searchAmap(ed); });
-  showCanon();
+  const { input, slot } = locPicker(ed.querySelector(".lpbox"), {
+    query: v.name,
+    onInput: showCanon,
+    onPick: (p) => {
+      if (p.amap_id) return assign(norm, { poi: { amap_id: p.amap_id, name: p.name, lat: p.lat, lng: p.lng } }, p.name);
+      const name = ed.querySelector(".cname").value.trim();
+      if (!name) { $("status").className = "err"; $("status").textContent = "手动坐标需要名称"; return; }
+      assign(norm, { coord: { name, lat: p.lat, lng: p.lng } }, name);
+    },
+  });
+  showCanon(v.name);
   input.focus();
-}
-
-// 手动坐标输入的问题说明；没问题返回 ""
-function coordError(text, ll) {
-  if (/j\.map\.baidu\.com/.test(text)) return "百度短链接里没有坐标：先在浏览器打开它，等页面显示出场馆后，复制地址栏的完整链接";
-  if (!ll && /baidu\.com/.test(text)) return "这个百度链接没定位到场馆：等页面显示出场馆详情、地址栏里出现 uid= 后再复制";
-  if (!ll) return "格式不对，应为高德坐标「经度,纬度」或百度地图链接（地址栏里带 @ 的那种）";
-  if (ll.coarse) return "精度不够：小数至少 4 位（坐标拾取器要登录并认证才显示完整坐标）";
-  return "";
-}
-
-async function searchAmap(ed) {
-  const q = ed.querySelector("input").value.trim();
-  if (!q) return;
-  const box = ed.querySelector(".amap");
-  box.innerHTML = `<div class="head">高德搜索中…</div>`;
-  try {
-    const { pois } = await api(`/api/amap/search?q=${encodeURIComponent(q)}`);
-    ed._pois = pois;
-    box.innerHTML = `<div class="head">高德搜索结果（${pois.length}）</div>` + (pois.map((p, i) =>
-      `<div data-poi="${i}">${esc(p.name)}<small>${esc(p.district)} ${esc(p.address)}</small>${mapLink(p.name, p.lat, p.lng)}</div>`).join("")
-      || `<div class="head">高德没有搜到，换个关键字试试；确实没有就点「标记搜不到」</div>`);
-  } catch (e) { box.innerHTML = `<div class="head err">高德搜索失败：${esc(e.message)}</div>`; }
 }
 
 async function act(norm, path, body = {}) {
@@ -236,21 +194,11 @@ $("tbody").addEventListener("click", (e) => {
   const tr = e.target.closest("tr");
   const norm = tr?.dataset.norm || tr?.previousElementSibling?.dataset.norm;
   const btn = e.target.closest("button");
-  const pick = e.target.closest(".pick > div[data-cid], .pick > div[data-poi]");
+  const pick = e.target.closest(".canon > div[data-cid]");
   if (btn) {
     const a = btn.dataset.act;
     if (a === "edit") openEditor(tr);
     else if (a === "close") { editing = null; tr.remove(); }
-    else if (a === "amap") searchAmap(tr);
-    else if (a === "coord") {
-      const name = tr.querySelector(".cname").value.trim();
-      const text = tr.querySelector(".cll").value;
-      const ll = parseCoord(text), err = name ? coordError(text, ll) : "手动坐标需要名称";
-      if (err) {
-        $("status").className = "err";
-        $("status").textContent = err;
-      } else assign(norm, { coord: { name, lat: ll.lat, lng: ll.lng } }, name);
-    }
     else if (a === "confirm") act(norm, "/api/venues/confirm");
     else if (a === "reset") act(norm, "/api/venues/reset");
     else if (a === "none") act(norm, "/api/venues/none");
@@ -260,9 +208,6 @@ $("tbody").addEventListener("click", (e) => {
   } else if (pick?.dataset.cid) {
     const c = canonicals.find((x) => x.id === Number(pick.dataset.cid));
     assign(norm, { canonical_id: c.id }, c.amap_name);
-  } else if (pick?.dataset.poi) {
-    const p = tr._pois[Number(pick.dataset.poi)];
-    assign(norm, { poi: { amap_id: p.amap_id, name: p.name, lat: p.lat, lng: p.lng } }, p.name);
   }
 });
 // 换视图/搜索时关掉编辑区：否则重绘恢复编辑区会抢走搜索框焦点、清掉编辑中的内容
