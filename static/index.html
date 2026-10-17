@@ -28,7 +28,13 @@
   aside input[type=number] { width: 72px; }
   aside select { min-width: 130px; }
   section { padding: 8px; overflow-x: auto; }
-  #count { padding: 2px 8px 6px; }
+  .cntbar { display: flex; align-items: center; padding: 2px 8px 6px; }
+  #colPick { position: relative; margin-left: auto; }
+  #colPick summary { cursor: pointer; list-style: none; color: var(--c-primary); font-size: 13px; user-select: none; }
+  #colPick summary::-webkit-details-marker { display: none; }
+  .colbox { position: absolute; right: 0; top: 120%; z-index: 20; padding: 6px 10px; white-space: nowrap;
+    background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .colbox label { display: block; padding: 2px 0; font-size: 13px; }
   th.s { cursor: pointer; user-select: none; }
   th.s:hover, th.s.on { color: var(--c-primary); }
   th.s.on::after { content: " ↑"; }  /* 当前排序列：升序 ↑ / 降序 ↓ */
@@ -104,7 +110,8 @@
     </div>
   </aside>
   <section class="card">
-    <div id="count" class="muted"></div>
+    <div class="cntbar"><span id="count" class="muted"></span>
+      <details id="colPick"><summary>通勤列 ▾</summary><div class="colbox"></div></details></div>
     <table>
       <thead><tr>
         <th class="s" data-sort="start_time">时间</th><th class="s" data-sort="duration">时长</th><th class="s" data-sort="venue">场馆 <span class="helpwrap"><span class="help" id="venueHelp">?</span><span class="pop" id="venuePop">上一行：平台读取到的名字<br>下一行：高德地图搜到的名字</span></span></th><th class="s" data-sort="club">俱乐部</th>
@@ -170,7 +177,8 @@ function makeChips(boxId, getOptions, { allowNew = false, onChange = () => {} } 
   return { values: () => vals.slice(), set: (arr) => { vals.length = 0; (arr || []).forEach((v) => { if (v && !vals.includes(v)) vals.push(v); }); renderChips(); } };
 }
 let origins = [];          // 出发地列表（GET /api/origins）
-const shownOrigins = () => origins.filter((o) => o.show);
+let hiddenOrigins = [];    // 表格里隐藏通勤列的出发地 key（看表偏好，随筛选条件存库）
+const shownOrigins = () => origins.filter((o) => !hiddenOrigins.includes(o.key));
 // 通勤上限框：data-cmax = 出发地 key
 const cmaxInputs = () => [...document.querySelectorAll("[data-cmax]")];
 const chips = {};          // 胶囊控件：id → 控件（id 同时是存库的字段名）
@@ -184,6 +192,7 @@ function formState() {
   const f = { mode: radio("mode"), sortBy, sortDesc };
   FIELDS.forEach((id) => { const el = $(id); f[id] = el.type === "checkbox" ? el.checked : el.value; });
   f.commuteMax = Object.fromEntries(cmaxInputs().map((el) => [el.dataset.cmax, el.value]));
+  f.hiddenOrigins = hiddenOrigins.filter((k) => origins.some((o) => o.key === k));  // 删掉的出发地不再记
   for (const [id, c] of Object.entries(chips)) f[id] = c.values();
   return f;
 }
@@ -191,6 +200,8 @@ function applyFormState(f) {
   if (!f) return;
   FIELDS.forEach((id) => { if (id in f) { const el = $(id); if (el.type === "checkbox") el.checked = !!f[id]; else el.value = f[id]; } });
   cmaxInputs().forEach((el) => { el.value = f.commuteMax?.[el.dataset.cmax] ?? ""; });
+  hiddenOrigins = Array.isArray(f.hiddenOrigins) ? f.hiddenOrigins : [];
+  renderColumns();
   if (document.querySelector(`th.s[data-sort="${CSS.escape(f.sortBy || "")}"]`)) { sortBy = f.sortBy; sortDesc = !!f.sortDesc; }  // 存的列已不存在则保持默认
   const m = document.querySelector(`input[name=mode][value="${f.mode}"]`);
   if (m) m.checked = true;
@@ -266,7 +277,18 @@ async function loadGames() {
   ensurePinyin([...venueOptions(), ...clubOptions(), ...kwOptions()]);
 }
 
-// 按出发地列表重建：筛选里的上限框（全部出发地）+ 表头通勤列（只「显示成列」的），保留已填的上限
+// 表头通勤列（未隐藏的出发地）+「通勤列」下拉里的勾选框
+function renderColumns() {
+  document.querySelectorAll("th.oc").forEach((th) => th.remove());
+  document.querySelector('th[data-sort="club"]').insertAdjacentHTML("afterend", shownOrigins().map((o) =>
+    `<th class="s oc" data-sort="commute:${esc(o.key)}">${esc(o.name)}通勤</th>`).join(""));
+  if (!document.querySelector(`th.s[data-sort="${CSS.escape(sortBy)}"]`)) { sortBy = "start_time"; sortDesc = false; }  // 排序列被删/隐藏
+  $("colPick").style.display = origins.length ? "" : "none";
+  $("colPick").querySelector(".colbox").innerHTML = origins.map((o) =>
+    `<label><input type="checkbox" data-col="${esc(o.key)}"${hiddenOrigins.includes(o.key) ? "" : " checked"}>${esc(o.name)}</label>`).join("");
+}
+
+// 按出发地列表重建：筛选里的上限框（全部出发地，含隐藏列的）+ 表头通勤列，保留已填的上限
 function applyOrigins(list) {
   origins = list;
   const cur = Object.fromEntries(cmaxInputs().map((el) => [el.dataset.cmax, el.value]));
@@ -276,10 +298,7 @@ function applyOrigins(list) {
     el.value = cur[el.dataset.cmax] ?? "";
     el.addEventListener("input", onFormChange);
   });
-  document.querySelectorAll("th.oc").forEach((th) => th.remove());
-  document.querySelector('th[data-sort="club"]').insertAdjacentHTML("afterend", shownOrigins().map((o) =>
-    `<th class="s oc" data-sort="commute:${esc(o.key)}">${esc(o.name)}通勤</th>`).join(""));
-  if (!document.querySelector(`th.s[data-sort="${CSS.escape(sortBy)}"]`)) { sortBy = "start_time"; sortDesc = false; }  // 排序列被删/隐藏
+  renderColumns();
   $("banner").style.display = origins.some((o) => o.lat != null) ? "none" : "block";
 }
 
@@ -319,6 +338,15 @@ $("tbody").closest("table").querySelector("thead").addEventListener("click", (e)
   sortBy = th.dataset.sort;
   onFormChange();
 });
+// 「通勤列」下拉：勾选即显示/隐藏该出发地的列并存库；点别处收起
+$("colPick").addEventListener("change", (e) => {
+  const k = e.target.dataset.col;
+  if (!k) return;
+  hiddenOrigins = e.target.checked ? hiddenOrigins.filter((x) => x !== k) : [...hiddenOrigins, k];
+  renderColumns();
+  onFormChange();
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#colPick")) $("colPick").open = false; });
 // 场馆列说明：点「?」图标弹/收说明，点别处收起
 $("venueHelp").onclick = (e) => { e.stopPropagation(); $("venuePop").classList.toggle("show"); };
 document.addEventListener("click", (e) => { if (!e.target.closest(".helpwrap")) $("venuePop").classList.remove("show"); });
@@ -328,14 +356,13 @@ $("tbody").addEventListener("click", (e) => {
 });
 
 // ---- 出发地面板：编辑草稿 draft，点「保存」整份提交 ----
-let draft = [];  // [{key?, name, address, lat, lng, show, loc?, msg?, cls?}]；loc = 改过但未保存的位置
+let draft = [];  // [{key?, name, address, lat, lng, loc?, msg?, cls?}]；loc = 改过但未保存的位置
 let picking = -1;  // 正在选位置的行（同一时间只开一个选点区）
 function renderAddr() {
   $("addrRows").innerHTML = draft.map((d, i) => `<div class="orow" data-i="${i}">
       <input class="oname" type="text" value="${esc(d.name)}" placeholder="名称，如 父母家">
       <span>${d.lat == null ? '<span class="muted">未定位</span>' : esc(d.address) + mapLink(d.name || "出发地", d.lat, d.lng)}${d.loc ? ' <span class="muted">（未保存）</span>' : ""}</span>
       <button data-act="loc">改位置</button>
-      <label><input class="oshow" type="checkbox"${d.show ? " checked" : ""}>显示成列</label>
       <button data-act="del" class="danger">删除</button>
       <span class="${d.cls || ""}">${esc(d.msg || "")}</span></div>
     <div class="opick"></div>`).join("");
@@ -355,11 +382,9 @@ function openPicker(i) {
   });
   input.focus();
 }
-$("addrRows").addEventListener("input", (e) => {  // 名称、显示成列：只改草稿，不重绘（免得丢焦点）
+$("addrRows").addEventListener("input", (e) => {  // 名称：只改草稿，不重绘（免得丢焦点）
   const d = draft[Number(e.target.closest(".orow")?.dataset.i)];
-  if (!d) return;
-  if (e.target.classList.contains("oname")) d.name = e.target.value;
-  if (e.target.classList.contains("oshow")) d.show = e.target.checked;
+  if (d && e.target.classList.contains("oname")) d.name = e.target.value;
 });
 $("addrRows").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-act]");
@@ -374,7 +399,7 @@ $("addrRows").addEventListener("click", (e) => {
   }
 });
 $("addrAdd").onclick = async () => {
-  draft.push({ name: "", address: "", lat: null, lng: null, show: true });
+  draft.push({ name: "", address: "", lat: null, lng: null });
   picking = draft.length - 1;
   renderAddr();
   try { $("addrCost").textContent = `新地址第一次算通勤约 ${(await api("/api/commute/status")).commute_places * 3} 次高德调用`; }
@@ -397,7 +422,7 @@ $("addrSave").onclick = async () => {
   let res;
   $("addrSave").disabled = true;
   try {
-    res = await api("/api/origins", { origins: sent.map((d) => ({ key: d.key, name: d.name, show: d.show, ...(d.loc ? { loc: d.loc } : {}) })) });
+    res = await api("/api/origins", { origins: sent.map((d) => ({ key: d.key, name: d.name, ...(d.loc ? { loc: d.loc } : {}) })) });
   } catch (e) { $("addrMsg").className = "err"; $("addrMsg").textContent = "保存失败：" + e.message; return; }
   finally { $("addrSave").disabled = false; }
   // 成功的条目记下 key、清掉未保存标记；失败的保留输入，提示原因

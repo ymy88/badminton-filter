@@ -202,7 +202,7 @@ def create_app(conn, config, db_path=None):
     @app.get("/api/origins")
     def get_origins():
         return jsonify([{"key": r["key"], "name": r["name"], "address": r["address"] or "",
-                         "lat": r["lat"], "lng": r["lng"], "show": bool(r["show"])}
+                         "lat": r["lat"], "lng": r["lng"]}
                         for r in conn.execute("SELECT * FROM origins ORDER BY pos, rowid")])
 
     def _origin_err(x):
@@ -244,13 +244,13 @@ def create_app(conn, config, db_path=None):
             if err:
                 res.append({"ok": False, "msg": err, "key": key})
                 continue
-            name, show = x["name"].strip(), 1 if x.get("show", True) else 0
+            name = x["name"].strip()
             if key is None:  # 新增：key 不复用，免得筛选条件里旧上限套到新出发地上
                 key, pos = "o" + uuid.uuid4().hex[:8], pos + 1
-                conn.execute("INSERT INTO origins(key,name,address,lat,lng,show,pos) VALUES(?,?,?,?,?,?,?)",
-                             (key, name, loc["address"], loc["lat"], loc["lng"], show, pos))
+                conn.execute("INSERT INTO origins(key,name,address,lat,lng,pos) VALUES(?,?,?,?,?,?)",
+                             (key, name, loc["address"], loc["lat"], loc["lng"], pos))
             else:
-                conn.execute("UPDATE origins SET name=?, show=? WHERE key=?", (name, show, key))
+                conn.execute("UPDATE origins SET name=? WHERE key=?", (name, key))
                 if loc is not None:
                     conn.execute("UPDATE origins SET address=?, lat=?, lng=? WHERE key=?",
                                  (loc["address"], loc["lat"], loc["lng"], key))

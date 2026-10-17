@@ -132,8 +132,8 @@ def test_pinyin():
 def _origins_app():
     # 两个已有出发地 + 各自一条通勤缓存
     conn = db.connect(":memory:"); db.init_schema(conn)
-    conn.execute("INSERT INTO origins(key,name,address,lat,lng,show,pos) VALUES"
-                 "('home','家','旧址',31.0,121.0,1,0),('company','公司','司',31.1,121.1,1,1)")
+    conn.execute("INSERT INTO origins(key,name,address,lat,lng,pos) VALUES"
+                 "('home','家','旧址',31.0,121.0,0),('company','公司','司',31.1,121.1,1)")
     conn.execute("INSERT INTO commute(origin,place_key,drive_min,transit_min) VALUES('home','v:x',20,30),('company','v:x',10,15)")
     conn.commit()
     return conn, appmod.create_app(conn, {}).test_client()
@@ -141,30 +141,30 @@ def _origins_app():
 def _cnt(conn, origin):
     return conn.execute("SELECT COUNT(*) c FROM commute WHERE origin=?", (origin,)).fetchone()["c"]
 
-HOME = {"key": "home", "name": "家", "show": True}
-COMPANY = {"key": "company", "name": "公司", "show": True}
+HOME = {"key": "home", "name": "家"}
+COMPANY = {"key": "company", "name": "公司"}
 LOC = {"address": "宜山路700号（徐汇区 宜山路700号）", "lat": 31.17, "lng": 121.42}
 
 def test_get_origins_list_ordered():
     conn, c = _origins_app()
     assert c.get("/api/origins").get_json() == [
-        {"key": "home", "name": "家", "address": "旧址", "lat": 31.0, "lng": 121.0, "show": True},
-        {"key": "company", "name": "公司", "address": "司", "lat": 31.1, "lng": 121.1, "show": True}]
+        {"key": "home", "name": "家", "address": "旧址", "lat": 31.0, "lng": 121.0},
+        {"key": "company", "name": "公司", "address": "司", "lat": 31.1, "lng": 121.1}]
 
 def test_add_origin_gets_new_key_and_pos():
     conn, c = _origins_app()
-    r = c.post("/api/origins", json={"origins": [HOME, COMPANY, {"name": "父母家", "show": False, "loc": LOC}]}).get_json()
+    r = c.post("/api/origins", json={"origins": [HOME, COMPANY, {"name": "父母家", "loc": LOC}]}).get_json()
     assert [x["ok"] for x in r] == [True, True, True]
     assert r[2]["changed"] is True and r[2]["key"].startswith("o") and len(r[2]["key"]) == 9
     row = conn.execute("SELECT * FROM origins WHERE key=?", (r[2]["key"],)).fetchone()
-    assert (row["name"], row["address"], row["lat"], row["lng"], row["show"], row["pos"]) == ("父母家", LOC["address"], 31.17, 121.42, 0, 2)
+    assert (row["name"], row["address"], row["lat"], row["lng"], row["pos"]) == ("父母家", LOC["address"], 31.17, 121.42, 2)
     assert r[0]["changed"] is False and _cnt(conn, "home") == 1  # 没带 loc 的不动
 
-def test_rename_and_hide_keep_commute():
+def test_rename_keeps_commute():
     conn, c = _origins_app()
-    c.post("/api/origins", json={"origins": [{"key": "home", "name": "老家", "show": False}, COMPANY]})
-    row = conn.execute("SELECT name,show,lat FROM origins WHERE key='home'").fetchone()
-    assert (row["name"], row["show"], row["lat"]) == ("老家", 0, 31.0)
+    c.post("/api/origins", json={"origins": [{"key": "home", "name": "老家"}, COMPANY]})
+    row = conn.execute("SELECT name,lat FROM origins WHERE key='home'").fetchone()
+    assert (row["name"], row["lat"]) == ("老家", 31.0)
     assert _cnt(conn, "home") == 1
 
 def test_move_origin_clears_only_its_commute():
@@ -184,11 +184,11 @@ def test_delete_origin_removes_row_and_commute():
 def test_save_origins_item_errors_dont_block_others():
     conn, c = _origins_app()
     r = c.post("/api/origins", json={"origins": [
-        {"key": "home", "name": "  ", "show": True},                                   # 名称空
+        {"key": "home", "name": "  "},                                   # 名称空
         COMPANY,
-        {"name": "外地", "show": True, "loc": {"address": "x", "lat": 39.9, "lng": 116.4}},  # 不在上海
-        {"name": "没位置", "show": True},                                              # 新增缺 loc
-        {"key": "nope", "name": "幽灵", "show": True}]}).get_json()                    # 不存在的 key
+        {"name": "外地", "loc": {"address": "x", "lat": 39.9, "lng": 116.4}},  # 不在上海
+        {"name": "没位置"},                                              # 新增缺 loc
+        {"key": "nope", "name": "幽灵"}]}).get_json()                    # 不存在的 key
     assert [x["ok"] for x in r] == [False, True, False, False, False]
     assert r[0]["msg"] == "名称不能为空"
     assert r[2]["msg"] == "坐标不在上海范围内，检查一下是不是复制错了"
@@ -215,7 +215,7 @@ def test_save_origins_409_while_computing(monkeypatch, tmp_path):
     r = c.post("/api/origins", json={"origins": [{**HOME, "name": "老家"}, COMPANY]})            # 只改名不受限
     assert r.status_code == 200 and r.get_json()[0]["ok"] is True
     # 新增不受限：后台快照里没有新出发地，算完的补一轮会算它
-    r = c.post("/api/origins", json={"origins": [HOME, COMPANY, {"name": "父母家", "show": True, "loc": LOC}]})
+    r = c.post("/api/origins", json={"origins": [HOME, COMPANY, {"name": "父母家", "loc": LOC}]})
     assert r.status_code == 200 and r.get_json()[2]["ok"] is True
     gate.set()
 
