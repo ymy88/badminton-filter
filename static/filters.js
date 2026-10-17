@@ -43,10 +43,9 @@ function applyFilters(games, criteria) {
       if (d == null || d < c.durRange[0] || d >= c.durRange[1]) return false;
     }
 
-    // 通勤上限：家/公司各自一个，均按当前方式 c.mode（驾车/公交）比较
+    // 通勤上限：每个出发地各自一个（commuteMax: {key: 分钟}），都要满足；均按当前方式 c.mode 比较
     if (c.mode) {
-      for (const [o, max] of [["home", c.homeCommuteMax], ["company", c.companyCommuteMax]]) {
-        if (max == null) continue;
+      for (const [o, max] of Object.entries(c.commuteMax || {})) {
         const v = g.commute?.[o]?.[c.mode];
         if (v == null) { if (!c.includeUnknownCommute) return false; }
         else if (v > max) return false;
@@ -77,9 +76,8 @@ function applyFilters(games, criteria) {
 
 // 排序取值表：by → 取值函数（数值或字符串，null/空串统一排最后）
 function sortKey(by, mode) {
+  if (by?.startsWith("commute:")) { const o = by.slice(8); return (g) => g.commute?.[o]?.[mode]; }  // 某个出发地的通勤
   switch (by) {
-    case "commute_home": return (g) => g.commute?.home?.[mode];
-    case "commute_company": return (g) => g.commute?.company?.[mode];
     case "start_time": return (g) => startMinutes(g.start_time);
     case "price": return (g) => g.price;
     case "applied": return (g) => g.applied_num;
