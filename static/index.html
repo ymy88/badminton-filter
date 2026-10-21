@@ -256,7 +256,7 @@ function rowHtml(g) {
     <td>${esc(g.applied_num)}/${esc(g.total_num)}</td>
     <td><span class="src ${esc(g.source)}">${esc(SRC[g.source] || g.source)}</span></td><td>${tags}</td></tr>
     <tr class="detail" style="display:none"><td colspan="${8 + shownOrigins().length}">${esc(g.raw_text || "（无原文）")}
-${origins.length ? "通勤：" + origins.map((o) => `${esc(o.name)} ${fmtCommute(g.commute?.[o.key])}`).join("　") + "\n" : ""}组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
+组织者：${esc(g.organizer || "—")}　俱乐部：${esc(g.club_name || "—")}
 回${esc(SRC[g.source] || g.source)}小程序按【${esc(g.date)} ${esc(g.start_time || "")}·${esc(g.venue_name || "")}】找这条报名；活动id ${esc(g.detail_ref || g.source_id || "—")}（仅供核对，不能直接搜）</td></tr>`;
 }
 
